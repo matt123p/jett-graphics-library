@@ -6,8 +6,6 @@
 
 #include "StdAfx.h"
 
-#ifndef __MACH__
-
 #undef clGetPlatformIDs
 #undef clGetDeviceIDs
 #undef clGetDeviceInfo
@@ -35,6 +33,11 @@
 
 #include "OpenCLRuntime.h"
 #include "jett.h"
+
+#if !defined(_WIN32)
+#include <dlfcn.h>
+#include <string.h>
+#endif
 
 #include <sstream>
 
@@ -94,12 +97,24 @@ namespace
     };
 
     OpenCLFunctionTable g_opencl = {};
+    
+#ifdef _WIN32
     HMODULE g_opencl_module = NULL;
+#else
+    void* g_opencl_module = NULL;
+#endif
     bool g_opencl_load_attempted = false;
     std::string g_opencl_load_error;
 
-    std::string format_win32_error(DWORD error_code)
+    std::string format_runtime_error(
+#ifdef _WIN32
+        DWORD error_code
+#else
+        const char* error_message
+#endif
+    )
     {
+#ifdef _WIN32
         if (error_code == 0)
         {
             return std::string();
@@ -134,16 +149,30 @@ namespace
         }
 
         return text.str();
+#else
+    if (!error_message || error_message[0] == 0)
+    {
+        return std::string("unknown loader error");
+    }
+
+    return error_message;
+#endif
     }
 
     template<typename T>
     bool load_symbol(T& target, const char* name)
     {
-        target = reinterpret_cast<T>(GetProcAddress(g_opencl_module, name));
+        
+#ifdef _WIN32
+    target = reinterpret_cast<T>(GetProcAddress(g_opencl_module, name));
+#else
+    dlerror();
+    target = reinterpret_cast<T>(dlsym(g_opencl_module, name));
+#endif
         if (!target)
         {
             std::ostringstream text;
-            text << "OpenCL.dll is missing required entry point '" << name << "'";
+			text << "OpenCL runtime is missing required entry point '" << name << "'";
             g_opencl_load_error = text.str();
             return false;
         }
@@ -159,12 +188,26 @@ namespace
         }
 
         g_opencl_load_attempted = true;
+
+#ifdef _WIN32
         g_opencl_module = LoadLibraryW(L"OpenCL.dll");
         if (!g_opencl_module)
         {
-            g_opencl_load_error = "Failed to load OpenCL.dll: " + format_win32_error(GetLastError());
+            g_opencl_load_error = "Failed to load OpenCL.dll: " + format_runtime_error(GetLastError());
             return false;
         }
+#else
+        g_opencl_module = dlopen("libOpenCL.so.1", RTLD_NOW | RTLD_LOCAL);
+        if (!g_opencl_module)
+        {
+            g_opencl_module = dlopen("libOpenCL.so", RTLD_NOW | RTLD_LOCAL);
+        }
+        if (!g_opencl_module)
+        {
+            g_opencl_load_error = "Failed to load libOpenCL.so: " + format_runtime_error(dlerror());
+            return false;
+        }
+#endif
 
         if (!load_symbol(g_opencl.pGetPlatformIDs, "clGetPlatformIDs")
             || !load_symbol(g_opencl.pGetDeviceIDs, "clGetDeviceIDs")
@@ -191,9 +234,14 @@ namespace
             || !load_symbol(g_opencl.pReleaseContext, "clReleaseContext")
             || !load_symbol(g_opencl.pFinish, "clFinish"))
         {
+
+#ifdef _WIN32
             FreeLibrary(g_opencl_module);
+#else
+            dlclose(g_opencl_module);
+#endif
             g_opencl_module = NULL;
-            ZeroMemory(&g_opencl, sizeof(g_opencl));
+            memset(&g_opencl, 0, sizeof(g_opencl));
             return false;
         }
 
@@ -354,5 +402,3 @@ namespace jett_opencl
         return require_symbol(g_opencl.pFinish)(command_queue);
     }
 }
-
-#endif

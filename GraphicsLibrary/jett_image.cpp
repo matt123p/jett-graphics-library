@@ -80,7 +80,7 @@ void jett_image::createImage( unsigned int width, unsigned int height, image_t t
     m_pImage->createImage( width, height, type, image_16bpp, mode );
 }
 
-#ifndef __MACH__
+#ifdef _WIN32
 /*!
  * \brief Create an unitialised windows bitmap
  *
@@ -188,7 +188,7 @@ void jett_image::loadFromFile( const TCHAR *filename, image_mode_t mode )
     m_pImage->loadFromFile( filename, mode );
 }
 
-#ifndef __MACH__
+#ifdef _WIN32
 void jett_image::loadFromFile( const char *filename, image_mode_t mode )
 {
     m_pImage->loadFromFile( to_unicode(filename).c_str(), mode );
@@ -234,7 +234,7 @@ void jett_image::saveToFile( const TCHAR *filename )
     m_pImage->saveToFile(filename);
 }
 
-#ifndef __MACH__
+#ifdef _WIN32
 void jett_image::saveToFile( const char *filename )
 {
     m_pImage->saveToFile(to_unicode(filename).c_str());
@@ -415,7 +415,7 @@ void jett_image::set_profile_data( const TCHAR *filename )
 	m_pImage->set_profile_data(filename);
 }
 
-#ifndef __MACH__
+#ifdef _WIN32
 void jett_image::set_profile_data( const char *filename )
 {
     m_pImage->set_profile_data(to_unicode(filename).c_str());

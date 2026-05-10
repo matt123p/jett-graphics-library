@@ -39,7 +39,7 @@ private:
     // The number of bytes/line
     size_t        m_stride;
 
-#ifndef __MACH__
+#ifdef _WIN32
 	// Windows Bitmap
 	HBITMAP		  m_bitmap;
 #endif
@@ -78,7 +78,7 @@ public:
 
     // Create this image from a file
     void createImage( unsigned int width, unsigned int height, image_t type, bool image_16bpp, image_mode_t mode );
-#ifndef __MACH__
+#ifdef _WIN32
     HBITMAP createBitmap( unsigned int width, unsigned int height, image_t type );
 #endif
     void loadFromFile( const TCHAR *filename, image_mode_t mode );

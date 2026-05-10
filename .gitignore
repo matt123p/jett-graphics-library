@@ -1,7 +1,8 @@
-
-#Ignore thumbnails created by Windows
+# OS files
 Thumbs.db
-#Ignore files built by Visual Studio
+.DS_Store
+
+# Visual Studio and Windows build artifacts
 *.obj
 *.exe
 *.pdb
@@ -18,18 +19,36 @@ Thumbs.db
 *.bak
 *.cache
 *.ilk
-*.log
-[Bb]in
-[Dd]ebug*/
 *.lib
 *.sbr
-obj/
+[Bb]in/
+[Dd]ebug*/
 [Rr]elease*/
+obj/
+
+# CMake and Linux/native build artifacts
+build/
+build-*/
+out/
+CMakeCache.txt
+CMakeFiles/
+cmake_install.cmake
+compile_commands.json
+Makefile
+install_manifest.txt
+install_manifest_*.txt
+Testing/
+
+# IDEs and tooling
 _ReSharper*/
 [Tt]est[Rr]esult*
 .vs/
 .idea/
-#Nuget packages folder
+.vscode/
+
+# Package restore
 packages/
+
+# Generated docs/test output
 /docs/example images/**
 /docs/_site_test_action/**

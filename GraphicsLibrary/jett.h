@@ -16,9 +16,13 @@
 #ifndef GraphicsLibrary_jett_h
 #define GraphicsLibrary_jett_h
 
-#ifndef __MACH__
+#ifdef _WIN32
 #ifndef DLLEXPORT
+#if defined(JETT_LIBRARY_BUILD)
+#define DLLEXPORT __declspec(dllexport)
+#else
 #define DLLEXPORT __declspec(dllimport)
+#endif
 #endif
 #else
 #define DLLEXPORT
@@ -399,7 +403,7 @@ public:
      * Call erase() if you need a white background before drawing.
      */
     void createImage( unsigned int width, unsigned int height, image_t type, bool image_16bpp = false, image_mode_t mode = image_mode_default );
-#ifndef __MACH__
+#ifdef _WIN32
 	/**
 	 * \brief Create a Windows-compatible bitmap-backed image.
 	 *
@@ -418,7 +422,7 @@ public:
     void loadFromFile( const TCHAR *filename, image_mode_t mode = image_mode_default );
 
     /// Narrow-character overload of loadFromFile().
-#ifndef __MACH__
+#ifdef _WIN32
     void loadFromFile( const char *filename, image_mode_t mode = image_mode_default );
 #endif
 
@@ -430,7 +434,7 @@ public:
     void saveToFile( const TCHAR *filename );
     
     /// Narrow-character overload of saveToFile().
-#ifndef __MACH__
+#ifdef _WIN32
     void saveToFile( const char *filename );
 #endif
 
@@ -498,7 +502,7 @@ public:
     void set_profile_data( const TCHAR *filename );
 
     /// Narrow-character overload of set_profile_data().
-#ifndef __MACH__
+#ifdef _WIN32
     void set_profile_data( const char *filename );
 #endif
     /**
@@ -651,7 +655,7 @@ public:
     void text( jett_font f, const unsigned char* colour, jett_image& dst_bitmap, int x, int y, const TCHAR * str, int flags );
 
     /// Narrow-character overload of text().
-#ifndef __MACH__
+#ifdef _WIN32
 	void text( jett_font f, const unsigned char* colour, jett_image& dst_bitmap, int x, int y, const char * str, int flags );
 #endif
 
@@ -659,7 +663,7 @@ public:
     jett_point size_text( jett_font f, const TCHAR * str );
 
     /// Narrow-character overload of size_text().
-#ifndef __MACH__
+#ifdef _WIN32
     jett_point size_text( jett_font f, const char * str );
 #endif
 
@@ -681,7 +685,7 @@ public:
 	 */
 	jett_font create_font( const TCHAR *filename, int width, int height, bool anti_alias );
 
-#ifndef __MACH__
+#ifdef _WIN32
 	/// Narrow-character overload of create_font().
 	jett_font create_font( const char *filename, int width, int height, bool anti_alias );
 #endif
@@ -689,7 +693,7 @@ public:
     /// Apply an affine transform to a font before drawing or measuring text.
     void set_font_matrix( jett_font f, const jett_matrix & matrix);
 
-#ifndef __MACH__
+#ifdef _WIN32
 	/// Create a font from an existing Windows HFONT with explicit pixel size.
 	jett_font create_font( HFONT f, int width, int height, bool anti_alias );	
 
@@ -734,7 +738,7 @@ public:
     /// Build a colour transform between the embedded profiles of two images.
     jett_transform build_transform( jett_image& src_image, jett_image& dst_image, int intent );
 
-#ifndef __MACH__
+#ifdef _WIN32
 	/// Narrow-character overload of build_transform().
 	jett_transform build_transform( const char *file_in, const char *file_out, int intent );
     /// Narrow-character overload of build_transform().
@@ -749,7 +753,7 @@ public:
      * Supported built-in device-link tokens are :mono_cmyk and :mono_rgb.
      */
     jett_transform build_transform( const TCHAR *devicelink_file, int intent );
-#ifndef __MACH__
+#ifdef _WIN32
 	/// Narrow-character overload of build_transform().
 	jett_transform build_transform( const char *devicelink_file, int intent );
 #endif
@@ -774,7 +778,7 @@ public:
 	/// Load a previously saved screen set from a file.
 	jett_screens load_screens( const TCHAR *filename );
 
-#ifndef __MACH__
+#ifdef _WIN32
 	/// Narrow-character overload of load_screens().
 	jett_screens load_screens( const char *filename );
 #endif
@@ -782,7 +786,7 @@ public:
 	/// Save a screen set to a file for later reuse.
 	void save_screens( jett_screens s, const TCHAR *filename );
 
-#ifndef __MACH__
+#ifdef _WIN32
 	/// Narrow-character overload of save_screens().
 	void save_screens( jett_screens s, const char *filename );
 #endif

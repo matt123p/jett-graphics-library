@@ -15,7 +15,7 @@
 #include "Image.h"
 
 
-#ifndef __MACH__
+#ifdef _WIN32
 // Trace function for debugging
 void _trace( const char *fmt, ... )
 {
@@ -167,7 +167,7 @@ void CGPUProcessor::Open()
     {
         cl_ulong p;
         clGetDeviceInfo( m_device_id, CL_DEVICE_MAX_MEM_ALLOC_SIZE, sizeof( p ), &p, NULL );
-        _trace( "jett: Max memory allocation: %lluMbytes\n", p / (1024*1024) );
+		_trace( "jett: Max memory allocation: %luMbytes\n", static_cast<unsigned long>(p / (1024 * 1024)) );
     }
 
     

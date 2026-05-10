@@ -114,7 +114,7 @@ private:
 	// part of
 	CImage*		  m_parent;
 	
-#ifndef __MACH__
+#ifdef _WIN32
 	// Windows Bitmap
 	HBITMAP		  m_bitmap;
 #endif
@@ -153,7 +153,7 @@ public:
 	void create( int start_y, int height );
 
 	// Create this bitmap compatible with a Windows HBITMAP
-#ifndef __MACH__
+#ifdef _WIN32
     HBITMAP createBitmap( unsigned int width, unsigned int height, image_t type );
 #endif
 

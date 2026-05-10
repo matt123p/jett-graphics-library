@@ -79,7 +79,7 @@ CImage::CImage()
 	m_clip_height = 0;
 	m_refs = 0;
 
-#ifndef __MACH__
+#ifdef _WIN32
 	m_bitmap = NULL;
 #endif
 
@@ -101,7 +101,7 @@ void CImage::discard()
 	m_profile_data = NULL;
 	m_profile_size = 0;
 
-#ifndef __MACH__
+#ifdef _WIN32
 	if (m_bitmap)
 	{
 		// Delete the bitmap
@@ -112,7 +112,7 @@ void CImage::discard()
 	{
 		delete[] m_data;
 	}
-#ifndef __MACH__
+#ifdef _WIN32
 	m_bitmap = NULL;
 #endif
 	m_data = NULL;
@@ -190,7 +190,7 @@ void CImage::createImage(unsigned int width, unsigned int height, image_t type, 
 	m_gpu_write_pending = false;
 }
 
-#ifndef __MACH__
+#ifdef _WIN32
 HBITMAP CImage::createBitmap(unsigned int width, unsigned int height, image_t type)
 {
 	// Make sure it is compatible with a windows Bitmap

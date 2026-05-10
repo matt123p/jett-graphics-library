@@ -127,7 +127,7 @@ public:
 };
 
 // This help function converts from ASCII to UNICODE
-#ifndef __MACH__
+#ifdef _WIN32
 typedef std::basic_string<TCHAR> wString;
 extern wString to_unicode( const char *txt );
 #endif

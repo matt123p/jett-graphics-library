@@ -145,7 +145,8 @@ cmsHPROFILE lcms_transform_sampler::openProfile( const TCHAR *filename, FILE* &f
     // Otherwise, try and load the file
     if (!hProfile)
     {
-#ifndef __MACH__
+
+#ifdef _WIN32
 	    file = NULL;
 		_tfopen_s( &file, filename,_T("rb"));
 		if ( !file )
@@ -160,7 +161,14 @@ cmsHPROFILE lcms_transform_sampler::openProfile( const TCHAR *filename, FILE* &f
             throw jett_exception(JETT_LCMS_FAILURE, 0, "Could not load input profile");
         }
 #else
-		hProfile =  cmsOpenProfileFromFile(filename, "r" );
+        file = NULL;
+        _tfopen_s( &file, filename,_T("rb"));
+        if ( !file )
+        {
+            throw jett_exception(JETT_LCMS_FAILURE, 0, "Could not load input profile");
+        }
+
+        hProfile =  cmsOpenProfileFromStream( file, "r" );
         if (!hProfile)
         {
             throw jett_exception(JETT_LCMS_FAILURE, 0, "Could not load input profile");

@@ -16,7 +16,7 @@
 #include "Font.h"
 #include "Line.h"
 #include "freetype_font_sampler.h"
-#ifndef __MACH__
+#ifdef _WIN32
 #include "gdi_font_sampler.h"
 #endif
 #include "OrderedScreenCollection.h"
@@ -24,7 +24,7 @@
 #include "LinearizationCollection.h"
 
 
-#ifndef __MACH__
+#ifdef _WIN32
 wString to_unicode( const char *txt )
 {
 	wString r;
@@ -568,7 +568,7 @@ void jett::text( jett_font f, const unsigned char* colour, jett_image& dst_bitma
 	f->paintString( col, *dst_bitmap, x, y, str, flags );
 }
 
-#ifndef __MACH__
+#ifdef _WIN32
 void jett::text( jett_font f, const unsigned char* colour, jett_image& dst_bitmap, int x, int y, const char * str, int flags )
 {
 	text( f, colour, dst_bitmap, x, y, to_unicode(str).c_str(), flags );
@@ -598,7 +598,7 @@ jett_point jett::size_text( jett_font f, const TCHAR * str )
     return f->sizeString( str );
 }
 
-#ifndef __MACH__
+#ifdef _WIN32
 jett_point jett::size_text( jett_font f, const char * str )
 {
     return f->sizeString( to_unicode(str).c_str() );
@@ -752,7 +752,7 @@ jett_transform jett::build_transform( const TCHAR *file_in, const TCHAR *file_ou
     return build_transform(&sampler);
 }
 
-#ifndef __MACH__
+#ifdef _WIN32
 jett_transform jett::build_transform( const char *file_in, const char *file_out, int intent )
 {
 	return build_transform( to_unicode( file_in ).c_str(), to_unicode( file_out ).c_str(), intent );
@@ -793,7 +793,7 @@ jett_transform jett::build_transform( jett_image& src_image, const TCHAR *file_o
     return build_transform(&sampler);
 }
 
-#ifndef __MACH__
+#ifdef _WIN32
 jett_transform jett::build_transform( jett_image& src_image, const char *file_out, int intent )
 {
 	return build_transform( src_image, to_unicode( file_out ).c_str(), intent );
@@ -834,7 +834,7 @@ jett_transform jett::build_transform( const TCHAR *file_in, jett_image& dst_imag
     return build_transform(&sampler);
 }
 
-#ifndef __MACH__
+#ifdef _WIN32
 jett_transform jett::build_transform( const char *file_in, jett_image& dst_image, int intent )
 {
 	return build_transform( to_unicode( file_in ).c_str(), dst_image, intent );
@@ -911,7 +911,7 @@ jett_transform jett::build_transform( const TCHAR *devicelink_file, int intent )
     }
 }
 
-#ifndef __MACH__
+#ifdef _WIN32
 jett_transform jett::build_transform( const char *devicelink_file, int intent )
 {
 	return build_transform( to_unicode( devicelink_file ).c_str(), intent );
@@ -1059,7 +1059,7 @@ jett_font jett::create_font( const TCHAR *filename, int width, int height, bool 
 	return r;
 }
 
-#ifndef __MACH__
+#ifdef _WIN32
 jett_font jett::create_font( const char *filename, int width, int height, bool anti_alias )
 {
 	return create_font( to_unicode(filename).c_str(), width, height, anti_alias );
@@ -1083,7 +1083,7 @@ void jett::set_font_matrix( jett_font f, const jett_matrix & matrix)
 }
 
 
-#ifndef __MACH__
+#ifdef _WIN32
 
 /*!
  * \brief Create a font from a GDI font
@@ -1234,7 +1234,7 @@ jett_screens jett::load_screens( const TCHAR *filename )
 	return s;
 }
 
-#ifndef __MACH__
+#ifdef _WIN32
 jett_screens jett::load_screens( const char *filename )
 {
 	return load_screens( to_unicode( filename ).c_str() );
@@ -1256,7 +1256,7 @@ void jett::save_screens( jett_screens s, const TCHAR *filename )
 	s->saveToFile( filename );
 }
 
-#ifndef __MACH__
+#ifdef _WIN32
 void jett::save_screens( jett_screens s, const char *filename )
 {
 	s->saveToFile( to_unicode( filename ).c_str() );
