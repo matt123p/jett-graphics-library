@@ -1,0 +1,12 @@
+title: Jett Graphics Library
+description: Graphics library for ink-jet printing.
+url: https://matt123p.github.io
+baseurl: /jett-graphics-library
+markdown: kramdown
+highlighter: rouge
+permalink: pretty
+defaults:
+- scope:
+    path: ""
+  values:
+    layout: default

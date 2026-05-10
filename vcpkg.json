@@ -1,0 +1,15 @@
+{
+  "name": "graphicslibrary",
+  "version-string": "1.0.0",
+  "dependencies": [
+    "freetype",
+    "lcms",
+    {
+      "name": "libjpeg-turbo",
+      "features": [ "jpeg8" ]
+    },
+    "libpng",
+    "tiff",
+    "zlib"
+  ]
+}

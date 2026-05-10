@@ -1,0 +1,79 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>{% if page.title %}{{ page.title }} | {% endif %}{{ site.title }}</title>
+    <meta name="description" content="{% if page.description %}{{ page.description }}{% else %}{{ site.description }}{% endif %}">
+    <link rel="stylesheet" href="{{ '/assets/site.css' | relative_url }}">
+  </head>
+  <body>
+    {% assign active_item = nil %}
+    {% for item in site.data.navigation %}
+      {% if page.url == item.url %}
+        {% assign active_item = item %}
+      {% endif %}
+    {% endfor %}
+    {% assign hero_text = page.description | default: active_item.summary | default: site.description %}
+    <div class="site-shell">
+      <header class="site-header">
+        <div class="site-header__bar">
+          <a class="brand" href="{{ '/' | relative_url }}">
+            <span class="brand__mark">GL</span>
+            <span class="brand__text">
+              <span class="brand__title">{{ site.title }}</span>
+              <span class="brand__subtitle">Print-oriented graphics documentation</span>
+            </span>
+          </a>
+          <nav class="top-nav" aria-label="Primary">
+            <a class="top-nav__link{% if page.url == '/' %} is-active{% endif %}" href="{{ '/' | relative_url }}">Overview</a>
+            <a class="top-nav__link{% if page.url == '/open-source-licenses/' %} is-active{% endif %}" href="{{ '/open-source-licenses/' | relative_url }}">LGPL</a>
+            <a class="top-nav__icon-link" href="https://github.com/matt123p/jett-graphics-library" aria-label="GitHub repository" target="_blank" rel="noreferrer">
+              <img class="top-nav__icon" src="{{ '/assets/github-mark.svg' | relative_url }}" alt="">
+            </a>
+          </nav>
+        </div>
+      </header>
+
+      <section class="hero">
+        <div class="hero__eyebrow">Technical Reference</div>
+        <div class="hero__grid">
+          <div>
+            <h1 class="hero__title">{{ page.title | default: site.title }}</h1>
+            <p class="hero__lede">{{ hero_text }}</p>
+          </div>
+          <aside class="hero__panel" aria-label="Page context">
+            <h2 class="hero__panel-title">On This Page</h2>
+            <p class="hero__panel-text">{% if active_item %}{{ active_item.summary }}{% else %}Authoritative notes and guidance for the Graphics Library API and print-processing workflow.{% endif %}</p>
+          </aside>
+        </div>
+      </section>
+
+      <div class="page-grid">
+        <aside class="rail" aria-label="Section navigation">
+          <h2 class="rail__title">Explore Docs</h2>
+          <div class="rail__list">
+            {% for item in site.data.navigation %}
+              {% assign is_active = false %}
+              {% if page.url == item.url %}
+                {% assign is_active = true %}
+              {% endif %}
+              <a class="rail__link{% if is_active %} is-active{% endif %}" href="{{ item.url | relative_url }}">
+                <span class="rail__link-title">{{ item.title }}</span>
+                <span class="rail__link-summary">{{ item.summary }}</span>
+              </a>
+            {% endfor %}
+          </div>
+        </aside>
+
+        <main class="content-card doc-content">
+          {{ content }}
+        </main>
+      </div>
+
+      <footer class="site-footer">
+        Built from Markdown with Jekyll for local review and static publishing.
+      </footer>
+    </div>
+  </body>
+</html>

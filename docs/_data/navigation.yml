@@ -1,0 +1,30 @@
+- title: Overview
+  url: /
+  summary: Library scope, API roadmap, and workflow overview.
+- title: BitBlt
+  url: /bitblt-algorithms/
+  summary: Scaling, transforms, alpha blending, and clipping.
+- title: Lines
+  url: /line-drawing/
+  summary: Stroke width, joins, anti-aliasing, and drawing patterns.
+- title: Polygons
+  url: /polygon-algorithms/
+  summary: Polygon filling, anti-aliasing, and line joins.
+- title: Colour
+  url: /colour-management-guide/
+  summary: ICC profiles, intents, and print-space conversions.
+- title: Text
+  url: /text-rendering-guide/
+  summary: Font pipelines, caching, and matrix-driven text.
+- title: Image I/O
+  url: /image-io-guide/
+  summary: Pixel formats, bit depth, and file-format choices.
+- title: OpenCL
+  url: /opencl/
+  summary: GPU backend basics, cache policy, and direct OpenCL access.
+- title: Dithering
+  url: /additional-features-guide/
+  summary: Dithering, linearization, and print-oriented output stages.
+- title: LGPL
+  url: /open-source-licenses/
+  summary: Key LGPL-3.0 terms for using, modifying, and redistributing the library.

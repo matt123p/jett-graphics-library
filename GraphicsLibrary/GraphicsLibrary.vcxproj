@@ -1,0 +1,168 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Project DefaultTargets="Build" ToolsVersion="14.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <ItemGroup Label="ProjectConfigurations">
+    <ProjectConfiguration Include="Debug|Win32">
+      <Configuration>Debug</Configuration>
+      <Platform>Win32</Platform>
+    </ProjectConfiguration>
+    <ProjectConfiguration Include="Release|Win32">
+      <Configuration>Release</Configuration>
+      <Platform>Win32</Platform>
+    </ProjectConfiguration>
+  </ItemGroup>
+  <PropertyGroup Label="Globals">
+    <ProjectGuid>{BE2A116A-D3E3-497E-B6DF-26E734C60978}</ProjectGuid>
+    <Keyword>Win32Proj</Keyword>
+    <RootNamespace>GraphicsLibrary</RootNamespace>
+  </PropertyGroup>
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.Default.props" />
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'" Label="Configuration">
+    <ConfigurationType>DynamicLibrary</ConfigurationType>
+    <UseDebugLibraries>true</UseDebugLibraries>
+    <CharacterSet>Unicode</CharacterSet>
+    <PlatformToolset>v143</PlatformToolset>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|Win32'" Label="Configuration">
+    <ConfigurationType>DynamicLibrary</ConfigurationType>
+    <UseDebugLibraries>false</UseDebugLibraries>
+    <WholeProgramOptimization>true</WholeProgramOptimization>
+    <CharacterSet>Unicode</CharacterSet>
+    <PlatformToolset>v143</PlatformToolset>
+  </PropertyGroup>
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.props" />
+  <ImportGroup Label="ExtensionSettings">
+  </ImportGroup>
+  <ImportGroup Label="PropertySheets" Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">
+    <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
+  </ImportGroup>
+  <ImportGroup Label="PropertySheets" Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">
+    <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
+  </ImportGroup>
+  <PropertyGroup Label="UserMacros" />
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">
+    <LinkIncremental>true</LinkIncremental>
+    <IncludePath>$(CUDA_PATH)\include;$(IncludePath)</IncludePath>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">
+    <LinkIncremental>false</LinkIncremental>
+    <IncludePath>$(CUDA_PATH)\include;$(IncludePath)</IncludePath>
+  </PropertyGroup>
+  <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">
+    <ClCompile>
+      <PrecompiledHeader>Use</PrecompiledHeader>
+      <WarningLevel>Level3</WarningLevel>
+      <Optimization>Disabled</Optimization>
+      <PreprocessorDefinitions>WIN32;_DEBUG;_WINDOWS;_USRDLL;GRAPHICSLIBRARY_EXPORTS;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <OpenMPSupport>true</OpenMPSupport>
+    </ClCompile>
+    <Link>
+      <SubSystem>Windows</SubSystem>
+      <GenerateDebugInformation>true</GenerateDebugInformation>
+      <AdditionalDependencies>gdiplus.lib;jpeg.lib;tiffd.lib;libpng16d.lib;zd.lib;lcms2.lib;freetyped.lib;%(AdditionalDependencies)</AdditionalDependencies>
+    </Link>
+    <PreBuildEvent>
+      <Command>echo Skipping kernel header generation.</Command>
+    </PreBuildEvent>
+  </ItemDefinitionGroup>
+  <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">
+    <ClCompile>
+      <WarningLevel>Level3</WarningLevel>
+      <PrecompiledHeader>Use</PrecompiledHeader>
+      <Optimization>MaxSpeed</Optimization>
+      <FunctionLevelLinking>true</FunctionLevelLinking>
+      <IntrinsicFunctions>true</IntrinsicFunctions>
+      <PreprocessorDefinitions>WIN32;NDEBUG;_WINDOWS;_USRDLL;GRAPHICSLIBRARY_EXPORTS;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <OpenMPSupport>true</OpenMPSupport>
+    </ClCompile>
+    <Link>
+      <SubSystem>Windows</SubSystem>
+      <GenerateDebugInformation>true</GenerateDebugInformation>
+      <EnableCOMDATFolding>true</EnableCOMDATFolding>
+      <OptimizeReferences>true</OptimizeReferences>
+      <AdditionalDependencies>gdiplus.lib;jpeg.lib;tiff.lib;libpng16.lib;z.lib;lcms2.lib;freetype.lib;%(AdditionalDependencies)</AdditionalDependencies>
+    </Link>
+  </ItemDefinitionGroup>
+  <ItemGroup>
+    <None Include="Colour.cl" />
+    <None Include="Dither.cl" />
+    <None Include="Polygon.cl" />
+  </ItemGroup>
+  <ItemGroup>
+    <ClInclude Include="CLKernel.h" />
+    <ClInclude Include="CLProgram.h" />
+    <ClInclude Include="Colour.cl.h" />
+    <ClInclude Include="CPUBitblt.h" />
+    <ClInclude Include="CPUDither.h" />
+    <ClInclude Include="CPUPolygon.h" />
+    <ClInclude Include="CPUProcessor.h" />
+    <ClInclude Include="Dither.cl.h" />
+    <ClInclude Include="Font.h" />
+    <ClInclude Include="freetype_font_sampler.h" />
+    <ClInclude Include="gdi_font_sampler.h" />
+    <ClInclude Include="GPUBitblt.h" />
+    <ClInclude Include="GPUDither.h" />
+    <ClInclude Include="GPUPolygon.h" />
+    <ClInclude Include="GPUProcessor.h" />
+    <ClInclude Include="GPUWorker.h" />
+    <ClInclude Include="Image.h" />
+    <ClInclude Include="k_only_transform_sampler.h" />
+    <ClInclude Include="lcms_transform_sampler.h" />
+    <ClInclude Include="Line.h" />
+    <ClInclude Include="Linearization.h" />
+    <ClInclude Include="LinearizationCollection.h" />
+    <ClInclude Include="OpenCLStub.h" />
+    <ClInclude Include="OpenCLRuntime.h" />
+    <ClInclude Include="OrderedBitmap.h" />
+    <ClInclude Include="OrderedScreen.h" />
+    <ClInclude Include="OrderedScreenCollection.h" />
+    <ClInclude Include="Polygon.cl.h" />
+    <ClInclude Include="Processor.h" />
+    <ClInclude Include="jett.h" />
+    <ClInclude Include="StdAfx.h" />
+    <ClInclude Include="SubImage.h" />
+    <ClInclude Include="targetver.h" />
+    <ClInclude Include="transform.h" />
+  </ItemGroup>
+  <ItemGroup>
+    <ClCompile Include="Bitblt.cpp" />
+    <ClCompile Include="CLKernel.cpp" />
+    <ClCompile Include="CLProgram.cpp" />
+    <ClCompile Include="CPUBitblt.cpp" />
+    <ClCompile Include="CPUDither.cpp" />
+    <ClCompile Include="CPUPolygon.cpp" />
+    <ClCompile Include="CPUProcessor.cpp" />
+    <ClCompile Include="Font.cpp" />
+    <ClCompile Include="freetype_font_sampler.cpp" />
+    <ClCompile Include="gdi_font_sampler.cpp" />
+    <ClCompile Include="GPUBitblt.cpp" />
+    <ClCompile Include="GPUDither.cpp" />
+    <ClCompile Include="GPUPolygon.cpp" />
+    <ClCompile Include="GPUProcessor.cpp" />
+    <ClCompile Include="GPUWorker.cpp" />
+    <ClCompile Include="Image.cpp" />
+    <ClCompile Include="k_only_transform_sampler.cpp" />
+    <ClCompile Include="lcm_transform_sampler.cpp" />
+    <ClCompile Include="Line.cpp" />
+    <ClCompile Include="Linearization.cpp" />
+    <ClCompile Include="LinearizationCollection.cpp" />
+    <ClCompile Include="OrderedBitmap.cpp" />
+    <ClCompile Include="OpenCLRuntime.cpp" />
+    <ClCompile Include="OrderedScreen.cpp" />
+    <ClCompile Include="OrderedScreenCollection.cpp" />
+    <ClCompile Include="jett.cpp" />
+    <ClCompile Include="jett_exception.cpp" />
+    <ClCompile Include="jett_image.cpp" />
+    <ClCompile Include="jett_matrix.cpp" />
+    <ClCompile Include="stdafx.cpp">
+      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">Create</PrecompiledHeader>
+      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">Create</PrecompiledHeader>
+    </ClCompile>
+    <ClCompile Include="SubImage.cpp" />
+    <ClCompile Include="transform.cpp" />
+  </ItemGroup>
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
+  <ImportGroup Label="ExtensionTargets">
+  </ImportGroup>
+</Project>
+
+
