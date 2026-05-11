@@ -12,8 +12,6 @@
 
 #ifdef _WIN32
 #define TEST_ASSET_DIR "test_images\\"
-#define cmyk_test_profile_path() _T("..\\..\\Adobe ICC Profiles\\CMYK Profiles\\USWebCoatedSWOP.icc")
-#define rgb_test_profile_path() _T("..\\..\\Adobe ICC Profiles\\RGB Profiles\\AdobeRGB1998.icc")
 #else
 #define TEST_ASSET_DIR "test_images/"
 #endif
@@ -23,6 +21,12 @@ typedef std::basic_string<TCHAR> output_string;
 namespace
 {
 	namespace fs = std::filesystem;
+
+	bool path_exists(const output_string &path)
+	{
+		std::error_code error;
+		return fs::exists(fs::path(path), error);
+	}
 
 	output_string path_native_string(const fs::path &path)
 	{
@@ -70,13 +74,6 @@ namespace
 		throw jett_exception(JETT_INTERNAL_ERROR, 0, message);
 	}
 
-	#ifndef _WIN32
-	bool path_exists(const output_string &path)
-	{
-		std::error_code error;
-		return fs::exists(fs::path(path), error);
-	}
-
 	bool directory_exists(const output_string &path)
 	{
 		std::error_code error;
@@ -114,6 +111,16 @@ namespace
 	output_string resolve_standard_profile_path(const std::vector<output_string> &profile_names)
 	{
 		std::vector<output_string> search_roots;
+	#ifdef _WIN32
+		search_roots.push_back(_T("..\\GraphicsLibrary\\GraphicsLibrary\\trunk\\Adobe ICC Profiles"));
+		search_roots.push_back(_T("Adobe ICC Profiles"));
+		search_roots.push_back(_T("..\\Adobe ICC Profiles"));
+		search_roots.push_back(_T("..\\..\\Adobe ICC Profiles"));
+		search_roots.push_back(_T("C:\\src\\GraphicsLibrary\\GraphicsLibrary\\trunk\\Adobe ICC Profiles"));
+		search_roots.push_back(_T("C:\\Windows\\System32\\spool\\drivers\\color"));
+		search_roots.push_back(_T("C:\\Program Files\\Common Files\\Adobe\\Color\\Profiles"));
+		search_roots.push_back(_T("C:\\Program Files (x86)\\Common Files\\Adobe\\Color\\Profiles"));
+	#else
 		const char *home = getenv("HOME");
 		if (home && home[0] != 0)
 		{
@@ -131,6 +138,7 @@ namespace
 		search_roots.push_back(_T("/usr/share/color/icc"));
 		search_roots.push_back(_T("/usr/local/share/color/icc"));
 		search_roots.push_back(_T("/var/lib/color/icc"));
+	#endif
 
 		for (size_t i = 0; i < search_roots.size(); ++i)
 		{
@@ -159,6 +167,30 @@ namespace
 		return output_string();
 	}
 
+	#ifdef _WIN32
+	const TCHAR *cmyk_test_profile_path()
+	{
+		static output_string path = resolve_standard_profile_path(std::vector<output_string>{
+			_T("USWebCoatedSWOP.icc"),
+			_T("SWOP_TR005_coated_5.icc"),
+			_T("SWOP_TR003_coated_3.icc"),
+			_T("default_cmyk.icc"),
+			_T("ps_cmyk.icc"),
+			_T("FOGRA39L_coated.icc")
+		});
+		return path.c_str();
+	}
+
+	const TCHAR *rgb_test_profile_path()
+	{
+		static output_string path = resolve_standard_profile_path(std::vector<output_string>{
+			_T("AdobeRGB1998.icc"),
+			_T("compatibleWithAdobeRGB1998.icc"),
+			_T("sRGB.icc")
+		});
+		return path.c_str();
+	}
+	#else
 	const TCHAR *cmyk_test_profile_path()
 	{
 		static output_string path = resolve_standard_profile_path(std::vector<output_string>{
@@ -197,6 +229,19 @@ namespace
 		}
 
 		throw_colour_management_error("Unable to create generated asset directory");
+	}
+
+	bool required_colour_profiles_available()
+	{
+		try
+		{
+			return path_exists(output_string(cmyk_test_profile_path()))
+				&& path_exists(output_string(rgb_test_profile_path()));
+		}
+		catch (...)
+		{
+			return false;
+		}
 	}
 
 	void ensure_directory_tree(const output_string &path)
@@ -468,7 +513,7 @@ namespace
 	{
 		jett_image src_image;
 		src_image.createImage(8, 8, image_rgb);
-		src_image.set_profile_data(":srgb");
+		src_image.set_profile_data(_T(":srgb"));
 
 		jett_image dst_image;
 		dst_image.createImage(8, 8, image_cmyk);
@@ -482,9 +527,9 @@ namespace
 		unsigned char expected_lab[3] = {0, 0, 0};
 		unsigned char actual_lab[3] = {0, 0, 0};
 
-		jett_transform reference = r.build_transform(":srgb", cmyk_test_profile_path(), INTENT_PERCEPTUAL);
+		jett_transform reference = r.build_transform(_T(":srgb"), cmyk_test_profile_path(), INTENT_PERCEPTUAL);
 		jett_transform from_src_image = r.build_transform(src_image, cmyk_test_profile_path(), INTENT_PERCEPTUAL);
-		jett_transform from_dst_image = r.build_transform(":srgb", dst_image, INTENT_PERCEPTUAL);
+		jett_transform from_dst_image = r.build_transform(_T(":srgb"), dst_image, INTENT_PERCEPTUAL);
 		jett_transform from_both_images = r.build_transform(src_image, dst_image, INTENT_PERCEPTUAL);
 
 		r.convert(reference, src_pixel, expected_cmyk);
@@ -502,9 +547,9 @@ namespace
 
 		jett_image mono_image;
 		mono_image.createImage(4, 4, image_mono);
-		mono_image.set_profile_data(":mono");
-		reference = r.build_transform(":srgb", ":mono", INTENT_PERCEPTUAL);
-		from_dst_image = r.build_transform(":srgb", mono_image, INTENT_PERCEPTUAL);
+		mono_image.set_profile_data(_T(":mono"));
+		reference = r.build_transform(_T(":srgb"), _T(":mono"), INTENT_PERCEPTUAL);
+		from_dst_image = r.build_transform(_T(":srgb"), mono_image, INTENT_PERCEPTUAL);
 		r.convert(reference, src_pixel, expected_mono);
 		r.convert(from_dst_image, src_pixel, actual_mono);
 		expect_pixels_equal(actual_mono, expected_mono, 1, "Built-in monochrome profile attachment diverged from :mono transform");
@@ -513,9 +558,9 @@ namespace
 
 		jett_image lab_image;
 		lab_image.createImage(4, 4, image_lab);
-		lab_image.set_profile_data(":lab");
-		reference = r.build_transform(":srgb", ":lab", INTENT_RELATIVE_COLORIMETRIC);
-		from_dst_image = r.build_transform(":srgb", lab_image, INTENT_RELATIVE_COLORIMETRIC);
+		lab_image.set_profile_data(_T(":lab"));
+		reference = r.build_transform(_T(":srgb"), _T(":lab"), INTENT_RELATIVE_COLORIMETRIC);
+		from_dst_image = r.build_transform(_T(":srgb"), lab_image, INTENT_RELATIVE_COLORIMETRIC);
 		r.convert(reference, src_pixel, expected_lab);
 		r.convert(from_dst_image, src_pixel, actual_lab);
 		expect_pixels_equal(actual_lab, expected_lab, 3, "Built-in Lab profile attachment diverged from :lab transform");
@@ -611,6 +656,12 @@ int run_colour_management_tests()
 
 	try
 	{
+		if (!required_colour_profiles_available())
+		{
+			printf("SKIP colour_management_tests: required ICC profiles are not available\n");
+			return 0;
+		}
+
 		jett r;
 		r.init(false);
 		validate_colour_management_features(r);

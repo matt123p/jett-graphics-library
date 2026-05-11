@@ -24,8 +24,6 @@ typedef std::basic_string<TCHAR> output_string;
 #ifdef _WIN32
 #define TEST_IMAGE_ROOT "test_images\\"
 #define FONT_FILE _T("C:\\Windows\\Fonts\\Arial.ttf")
-#define cmyk_test_profile_path() _T("..\\..\\Adobe ICC Profiles\\CMYK Profiles\\USWebCoatedSWOP.icc")
-#define rgb_test_profile_path() _T("..\\..\\Adobe ICC Profiles\\RGB Profiles\\AdobeRGB1998.icc")
 #else
 #define TEST_IMAGE_ROOT "test_images/"
 #define FONT_FILE test_font_path()
@@ -40,6 +38,12 @@ typedef std::basic_string<TCHAR> output_string;
 namespace
 {
 	namespace fs = std::filesystem;
+
+	bool path_exists(const output_string &path)
+	{
+		std::error_code error;
+		return fs::exists(fs::path(path), error);
+	}
 
 	output_string path_native_string(const fs::path &path)
 	{
@@ -74,13 +78,6 @@ namespace
 	void throw_output_error(const char *message)
 	{
 		throw jett_exception(JETT_INTERNAL_ERROR, 0, message);
-	}
-
-	#ifndef _WIN32
-	bool path_exists(const output_string &path)
-	{
-		std::error_code error;
-		return fs::exists(fs::path(path), error);
 	}
 
 	bool directory_exists(const output_string &path)
@@ -120,6 +117,16 @@ namespace
 	output_string resolve_standard_profile_path(const std::vector<output_string> &profile_names)
 	{
 		std::vector<output_string> search_roots;
+	#ifdef _WIN32
+		search_roots.push_back(_T("..\\GraphicsLibrary\\GraphicsLibrary\\trunk\\Adobe ICC Profiles"));
+		search_roots.push_back(_T("Adobe ICC Profiles"));
+		search_roots.push_back(_T("..\\Adobe ICC Profiles"));
+		search_roots.push_back(_T("..\\..\\Adobe ICC Profiles"));
+		search_roots.push_back(_T("C:\\src\\GraphicsLibrary\\GraphicsLibrary\\trunk\\Adobe ICC Profiles"));
+		search_roots.push_back(_T("C:\\Windows\\System32\\spool\\drivers\\color"));
+		search_roots.push_back(_T("C:\\Program Files\\Common Files\\Adobe\\Color\\Profiles"));
+		search_roots.push_back(_T("C:\\Program Files (x86)\\Common Files\\Adobe\\Color\\Profiles"));
+	#else
 		const char *home = getenv("HOME");
 		if (home && home[0] != 0)
 		{
@@ -138,6 +145,7 @@ namespace
 		search_roots.push_back(_T("/usr/share/color/icc"));
 		search_roots.push_back(_T("/usr/local/share/color/icc"));
 		search_roots.push_back(_T("/var/lib/color/icc"));
+	#endif
 
 		for (size_t i = 0; i < search_roots.size(); ++i)
 		{
@@ -166,6 +174,30 @@ namespace
 		return output_string();
 	}
 
+	#ifdef _WIN32
+	const TCHAR *cmyk_test_profile_path()
+	{
+		static output_string path = resolve_standard_profile_path(std::vector<output_string>{
+			_T("USWebCoatedSWOP.icc"),
+			_T("SWOP_TR005_coated_5.icc"),
+			_T("SWOP_TR003_coated_3.icc"),
+			_T("default_cmyk.icc"),
+			_T("ps_cmyk.icc"),
+			_T("FOGRA39L_coated.icc")
+		});
+		return path.c_str();
+	}
+
+	const TCHAR *rgb_test_profile_path()
+	{
+		static output_string path = resolve_standard_profile_path(std::vector<output_string>{
+			_T("AdobeRGB1998.icc"),
+			_T("compatibleWithAdobeRGB1998.icc"),
+			_T("sRGB.icc")
+		});
+		return path.c_str();
+	}
+	#else
 	output_string resolve_standard_font_path(const std::vector<output_string> &font_names)
 	{
 		std::vector<output_string> search_roots;
@@ -252,6 +284,19 @@ namespace
 		}
 
 		throw_output_error("Unable to create output directory");
+	}
+
+	bool required_colour_profiles_available()
+	{
+		try
+		{
+			return path_exists(output_string(cmyk_test_profile_path()))
+				&& path_exists(output_string(rgb_test_profile_path()));
+		}
+		catch (...)
+		{
+			return false;
+		}
 	}
 
 	const int kCompareByteTolerance = 2;
@@ -1958,8 +2003,40 @@ namespace
 
 	int run_python_generated_asset_validation()
 	{
-		int result = system("python3 GraphicsTest/verify_generated_images.py test_images/generated_assets_manifest.tsv");
-		return result;
+	#ifdef _WIN32
+		struct python_command_t
+		{
+			const char *check;
+			const char *run;
+		};
+
+		const python_command_t commands[] = {
+			{"python3 --version >nul 2>&1", "python3 GraphicsTest/verify_generated_images.py test_images/generated_assets_manifest.tsv"},
+			{"py -3 --version >nul 2>&1", "py -3 GraphicsTest/verify_generated_images.py test_images/generated_assets_manifest.tsv"},
+			{"python --version >nul 2>&1", "python GraphicsTest/verify_generated_images.py test_images/generated_assets_manifest.tsv"}
+		};
+	#else
+		struct python_command_t
+		{
+			const char *check;
+			const char *run;
+		};
+
+		const python_command_t commands[] = {
+			{"python3 --version >/dev/null 2>&1", "python3 GraphicsTest/verify_generated_images.py test_images/generated_assets_manifest.tsv"},
+			{"python --version >/dev/null 2>&1", "python GraphicsTest/verify_generated_images.py test_images/generated_assets_manifest.tsv"}
+		};
+	#endif
+
+		for (size_t i = 0; i < sizeof(commands) / sizeof(commands[0]); ++i)
+		{
+			if (system(commands[i].check) == 0)
+			{
+				return system(commands[i].run);
+			}
+		}
+
+		return -1;
 	}
 
 	int run_generated_asset_tests()
@@ -1972,7 +2049,14 @@ namespace
 			jett r;
 			r.init(false);
 			generate_generated_assets(r);
-			if (run_python_generated_asset_validation() != 0)
+			int python_validation = run_python_generated_asset_validation();
+			if (python_validation < 0)
+			{
+				printf("SKIP generated_asset_tests: Python interpreter not available for image validation\n");
+				return 0;
+			}
+
+			if (python_validation != 0)
 			{
 				throw_asset_error("Python validation of generated assets failed");
 			}
@@ -2882,6 +2966,13 @@ namespace
 		srand(1);
 
 		printf("RUN %s SUITE\n", label);
+
+		if (!required_colour_profiles_available())
+		{
+			printf("SKIP %s suite: required ICC profiles are not available\n", label);
+			output_names.clear();
+			return 0;
+		}
 
 		try
 		{

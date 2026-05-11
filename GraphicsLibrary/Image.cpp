@@ -7,6 +7,7 @@
 #include "StdAfx.h"
 #include "Image.h"
 #include "GPUProcessor.h"
+#include <limits>
 #include <math.h>
 #include <setjmp.h>
 
@@ -17,7 +18,8 @@
 #include "lcms_transform_sampler.h"
 
 // Structures for loading BMP file
-typedef struct RGBApixel {
+typedef struct RGBApixel
+{
 	uint8_t Blue;
 	uint8_t Green;
 	uint8_t Red;
@@ -36,17 +38,147 @@ struct BMFH
 struct BMIH
 {
 	uint32_t biSize;
-	int32_t  biWidth;
-	int32_t  biHeight;
+	int32_t biWidth;
+	int32_t biHeight;
 	uint16_t biPlanes;
 	uint16_t biBitCount;
 	uint32_t biCompression;
 	uint32_t biSizeImage;
-	int32_t  biXPelsPerMeter;
-	int32_t  biYPelsPerMeter;
+	int32_t biXPelsPerMeter;
+	int32_t biYPelsPerMeter;
 	uint32_t biClrUsed;
 	uint32_t biClrImportant;
 };
+
+namespace
+{
+	static bool checked_mul_size(size_t left, size_t right, size_t &result)
+	{
+		if (left != 0 && right > std::numeric_limits<size_t>::max() / left)
+		{
+			return false;
+		}
+
+		result = left * right;
+		return true;
+	}
+
+	static size_t align_size(size_t value, size_t alignment, const char *message)
+	{
+		if (alignment == 0)
+		{
+			throw jett_exception(JETT_INVALID_ARGUMENT, 0, message);
+		}
+
+		const size_t remainder = value % alignment;
+		if (remainder == 0)
+		{
+			return value;
+		}
+
+		const size_t padding = alignment - remainder;
+		if (value > std::numeric_limits<size_t>::max() - padding)
+		{
+			throw jett_exception(JETT_INVALID_ARGUMENT, 0, message);
+		}
+
+		return value + padding;
+	}
+
+	static size_t checked_image_size(size_t stride, int height, const char *message)
+	{
+		if (height < 0)
+		{
+			throw jett_exception(JETT_INVALID_BITMAP, 0, message);
+		}
+
+		size_t image_size = 0;
+		if (!checked_mul_size(stride, static_cast<size_t>(height), image_size))
+		{
+			throw jett_exception(JETT_INVALID_ARGUMENT, 0, message);
+		}
+
+		return image_size;
+	}
+
+	static int checked_image_dimension(unsigned int value, const char *message)
+	{
+		if (value > static_cast<unsigned int>(std::numeric_limits<int>::max()))
+		{
+			throw jett_exception(JETT_INVALID_ARGUMENT, 0, message);
+		}
+
+		return static_cast<int>(value);
+	}
+
+	static void validate_loaded_dimensions(size_t width, size_t height, const char *message)
+	{
+		if (width == 0 || height == 0 || width > static_cast<size_t>(std::numeric_limits<int>::max()) || height > static_cast<size_t>(std::numeric_limits<int>::max()))
+		{
+			throw jett_exception(JETT_INVALID_BITMAP, 0, message);
+		}
+	}
+
+	static size_t pixel_stride_for_type(image_t type)
+	{
+		switch (type)
+		{
+		case image_mono:
+			return 1;
+		case image_rgb:
+		case image_bgr:
+			return 3;
+		case image_rgba:
+		case image_bgra:
+		case image_cmyk:
+			return 4;
+		case image_lab:
+			return 3;
+		default:
+			throw jett_exception(JETT_INVALID_BITMAP, 0, "Invalid image type");
+		}
+	}
+
+	static size_t calculate_image_stride(int width, image_t type, bool image_16bpp)
+	{
+		const size_t width_size = static_cast<size_t>(width);
+		switch (type)
+		{
+		case image_mono1:
+			return align_size((width_size + 7) / 8, 4, "Image dimensions are too large");
+		case image_mono2:
+			return align_size((width_size + 3) / 4, 4, "Image dimensions are too large");
+		case image_mono4:
+			return align_size((width_size + 1) / 2, 4, "Image dimensions are too large");
+		default:
+		{
+			size_t row_bytes = 0;
+			if (!checked_mul_size(pixel_stride_for_type(type), width_size, row_bytes))
+			{
+				throw jett_exception(JETT_INVALID_ARGUMENT, 0, "Image dimensions are too large");
+			}
+
+			if (image_16bpp && !checked_mul_size(row_bytes, 2, row_bytes))
+			{
+				throw jett_exception(JETT_INVALID_ARGUMENT, 0, "Image dimensions are too large");
+			}
+
+			return align_size(row_bytes, 4, "Image dimensions are too large");
+		}
+		}
+	}
+
+	static size_t calculate_jpeg_stride(image_t type, int width)
+	{
+		size_t row_bytes = 0;
+		if (!checked_mul_size(pixel_stride_for_type(type), static_cast<size_t>(width), row_bytes))
+		{
+			throw jett_exception(JETT_INVALID_BITMAP, 0, "Invalid JPEG image dimensions");
+		}
+
+		return align_size(row_bytes, 32, "Invalid JPEG image dimensions");
+	}
+}
 
 static int IntPow(int base, int exponent)
 {
@@ -152,8 +284,8 @@ void CImage::createImage(unsigned int width, unsigned int height, image_t type, 
 	m_profile_size = 0;
 
 	// Now setup the new data
-	m_width = width;
-	m_height = height;
+	m_width = checked_image_dimension(width, "Image dimensions are too large");
+	m_height = checked_image_dimension(height, "Image dimensions are too large");
 	m_clip_x1 = 0;
 	m_clip_y1 = 0;
 	m_clip_width = width;
@@ -162,27 +294,11 @@ void CImage::createImage(unsigned int width, unsigned int height, image_t type, 
 	m_type = type;
 	m_16bpp = image_16bpp;
 
-	int bytes_per_col = m_16bpp ? 2 : 1;
-
-	switch (type)
-	{
-	case image_mono1:
-		m_stride = (m_width / 8 + 3) / 4 * 4;
-		break;
-	case image_mono2:
-		m_stride = (m_width / 4 + 3) / 4 * 4;
-		break;
-	case image_mono4:
-		m_stride = (m_width / 2 + 3) / 4 * 4;
-		break;
-	default:
-		m_stride = (getPixelStride() * m_width * bytes_per_col + 3) / 4 * 4;
-		break;
-	}
+	m_stride = calculate_image_stride(m_width, type, m_16bpp);
 
 	// Generate the image buffer
 	delete[] m_data;
-	m_data = new unsigned char[m_height * m_stride];
+	m_data = new unsigned char[checked_image_size(m_stride, m_height, "Image dimensions are too large")];
 
 	m_mode = mode;
 	m_cpu_changed = false;
@@ -253,9 +369,10 @@ HBITMAP CImage::createBitmap(unsigned int width, unsigned int height, image_t ty
 
 	// Generate the image buffer
 	{
-		struct {
+		struct
+		{
 			BITMAPINFOHEADER bi_dst;
-			RGBQUAD	palette[256];
+			RGBQUAD palette[256];
 		} b;
 		ZeroMemory(&b, sizeof(b));
 		b.bi_dst.biSize = sizeof(b.bi_dst);
@@ -279,8 +396,8 @@ HBITMAP CImage::createBitmap(unsigned int width, unsigned int height, image_t ty
 		}
 
 		PVOID bits = NULL;
-		m_bitmap = CreateDIBSection(NULL, (BITMAPINFO*)&b.bi_dst, DIB_RGB_COLORS, &bits, NULL, 0);
-		m_data = (unsigned char*)bits;
+		m_bitmap = CreateDIBSection(NULL, (BITMAPINFO *)&b.bi_dst, DIB_RGB_COLORS, &bits, NULL, 0);
+		m_data = (unsigned char *)bits;
 	}
 
 	m_mode = image_mode_gpu_ro;
@@ -292,7 +409,7 @@ HBITMAP CImage::createBitmap(unsigned int width, unsigned int height, image_t ty
 }
 #endif
 
-void CImage::copy_bitmap(unsigned int width, unsigned int height, image_t type, image_mode_t mode, const unsigned char* data, size_t stride, int bpp, bool invert)
+void CImage::copy_bitmap(unsigned int width, unsigned int height, image_t type, image_mode_t mode, const unsigned char *data, size_t stride, int bpp, bool invert)
 {
 	createImage(width, height, type, false, mode);
 
@@ -300,8 +417,8 @@ void CImage::copy_bitmap(unsigned int width, unsigned int height, image_t type, 
 	size_t copy_stride = std::min(m_stride, stride);
 	for (int y = 0; y < m_height; ++y)
 	{
-		const unsigned char* src = data + y * stride;
-		unsigned char* dst = m_data + y * m_stride;
+		const unsigned char *src = data + y * stride;
+		unsigned char *dst = m_data + y * m_stride;
 
 		switch (bpp)
 		{
@@ -352,13 +469,13 @@ void CImage::copy_bitmap(unsigned int width, unsigned int height, image_t type, 
 	m_gpu_changed = false;
 }
 
-void CImage::loadFromFile(const TCHAR* filename, image_mode_t mode)
+void CImage::loadFromFile(const TCHAR *filename, image_mode_t mode)
 {
 	// Keep track of the user requested mode
 	m_mode = mode;
 
 	// Does this file exist?
-	FILE* fin = NULL;
+	FILE *fin = NULL;
 	_tfopen_s(&fin, filename, _T("rb"));
 	if (!fin)
 	{
@@ -395,10 +512,10 @@ void CImage::loadFromFile(const TCHAR* filename, image_mode_t mode)
 	}
 }
 
-void CImage::saveToFile(const TCHAR* filename)
+void CImage::saveToFile(const TCHAR *filename)
 {
 	// What is the extension?
-	const TCHAR* extension = _tcsrchr(filename, '.');
+	const TCHAR *extension = _tcsrchr(filename, '.');
 	if (extension)
 	{
 		if (strcasecmp(extension, _T(".tiff")) == 0 || strcasecmp(extension, _T(".tif")) == 0)
@@ -429,23 +546,23 @@ void CImage::saveToFile(const TCHAR* filename)
 static jmp_buf tif_jmp_buf;
 
 // TIFF error handlers
-static void image_tiffWarningHandler(const char* module, const char* fmt, va_list args)
+static void image_tiffWarningHandler(const char *module, const char *fmt, va_list args)
 {
 	// Warnings are ignored
 }
 
 static char tiff_error_bufer[512];
 
-static void image_tiffErrorHandler(const char* module, const char* fmt, va_list args)
+static void image_tiffErrorHandler(const char *module, const char *fmt, va_list args)
 {
-	vsprintf_s(tiff_error_bufer, sizeof(tiff_error_bufer), (const char*)fmt, args);
+	vsprintf_s(tiff_error_bufer, sizeof(tiff_error_bufer), (const char *)fmt, args);
 	longjmp(tif_jmp_buf, 1);
 }
 
 // Create this image from a file
-bool CImage::loadFromFileTIFF(const TCHAR* filename)
+bool CImage::loadFromFileTIFF(const TCHAR *filename)
 {
-	TIFF* tif = NULL;
+	TIFF *tif = NULL;
 
 	// Set up the return function
 	int err = setjmp(tif_jmp_buf);
@@ -552,9 +669,7 @@ bool CImage::loadFromFileTIFF(const TCHAR* filename)
 	m_y_res = 72;
 	uint16_t res_unit = 0;
 	float xres, yres;
-	if (TIFFGetField(tif, TIFFTAG_RESOLUTIONUNIT, &res_unit)
-		&& TIFFGetField(tif, TIFFTAG_XRESOLUTION, &xres)
-		&& TIFFGetField(tif, TIFFTAG_XRESOLUTION, &yres))
+	if (TIFFGetField(tif, TIFFTAG_RESOLUTIONUNIT, &res_unit) && TIFFGetField(tif, TIFFTAG_XRESOLUTION, &xres) && TIFFGetField(tif, TIFFTAG_XRESOLUTION, &yres))
 	{
 		switch (res_unit)
 		{
@@ -580,7 +695,7 @@ bool CImage::loadFromFileTIFF(const TCHAR* filename)
 	if (m_type != image_lab)
 	{
 		uint32_t EmbedLen = 0;
-		uint8_t* EmbedBuffer = NULL;
+		uint8_t *EmbedBuffer = NULL;
 		if (TIFFGetField(tif, TIFFTAG_ICCPROFILE, &EmbedLen, &EmbedBuffer))
 		{
 			m_profile_size = EmbedLen;
@@ -598,14 +713,14 @@ bool CImage::loadFromFileTIFF(const TCHAR* filename)
 	if (m_type == image_rgba && !m_16bpp)
 	{
 		// Load using the special libtiff function
-		TIFFReadRGBAImageOriented(tif, m_width, m_height, reinterpret_cast<uint32_t*>(m_data), ORIENTATION_TOPLEFT, 0);
+		TIFFReadRGBAImageOriented(tif, m_width, m_height, reinterpret_cast<uint32_t *>(m_data), ORIENTATION_TOPLEFT, 0);
 	}
 	else
 	{
 		// Load as RAW data!
 		for (int y = 0; y < m_height; ++y)
 		{
-			unsigned char* p = m_data + y * m_stride;
+			unsigned char *p = m_data + y * m_stride;
 			TIFFReadScanline(tif, p, static_cast<uint32_t>(y), 0);
 		}
 	}
@@ -616,7 +731,7 @@ bool CImage::loadFromFileTIFF(const TCHAR* filename)
 }
 
 // JPEG error handlers
-typedef struct my_error_mgr* my_error_ptr;
+typedef struct my_error_mgr *my_error_ptr;
 
 /*
  * Here's the routine that will replace the standard error_exit method:
@@ -630,19 +745,19 @@ jpeg_error_exit(j_common_ptr cinfo)
 
 	/* Always display the message. */
 	/* We could postpone this until after returning, if we chose. */
-	(*cinfo->err->output_message) (cinfo);
+	(*cinfo->err->output_message)(cinfo);
 
 	throw jett_exception(JETT_INVALID_BITMAP, 0, "JPEG error");
 }
 
 // Create this image from a file
-bool CImage::loadFromFileJPEG(const TCHAR* filename)
+bool CImage::loadFromFileJPEG(const TCHAR *filename)
 {
 	/* these are standard libjpeg structures for reading(decompression) */
 	struct jpeg_decompress_struct cinfo;
 	struct jpeg_error_mgr jerr;
 
-	FILE* infile = NULL;
+	FILE *infile = NULL;
 	_tfopen_s(&infile, filename, _T("rb"));
 	if (!infile)
 	{
@@ -675,8 +790,9 @@ bool CImage::loadFromFileJPEG(const TCHAR* filename)
 		m_16bpp = false;
 
 		// Read image parameters
-		m_width = cinfo.output_width;
-		m_height = cinfo.output_height;
+		validate_loaded_dimensions(cinfo.output_width, cinfo.output_height, "Invalid JPEG image dimensions");
+		m_width = static_cast<int>(cinfo.output_width);
+		m_height = static_cast<int>(cinfo.output_height);
 
 		// Set the clipping rectangle
 		m_clip_x1 = 0;
@@ -705,10 +821,10 @@ bool CImage::loadFromFileJPEG(const TCHAR* filename)
 			int seq_no;
 			size_t total_length;
 
-			const int MAX_SEQ_NO = 255;			// sufficient since marker numbers are bytes
-			bool     marker_present[MAX_SEQ_NO + 1];	// 1 if marker found
-			size_t   data_length[MAX_SEQ_NO + 1];	// size of profile data in marker
-			JOCTET* icc_data[MAX_SEQ_NO + 1];	// offset for data in marker
+			const int MAX_SEQ_NO = 255;			 // sufficient since marker numbers are bytes
+			bool marker_present[MAX_SEQ_NO + 1]; // 1 if marker found
+			size_t data_length[MAX_SEQ_NO + 1];	 // size of profile data in marker
+			JOCTET *icc_data[MAX_SEQ_NO + 1];	 // offset for data in marker
 
 			/**
 			 this first pass over the saved markers discovers whether there are
@@ -717,11 +833,9 @@ bool CImage::loadFromFileJPEG(const TCHAR* filename)
 
 			memset(marker_present, 0, (MAX_SEQ_NO + 1));
 
-			for (struct jpeg_marker_struct* marker = cinfo.marker_list; !invalid_profile && marker; marker = marker->next)
+			for (struct jpeg_marker_struct *marker = cinfo.marker_list; !invalid_profile && marker; marker = marker->next)
 			{
-				if (marker->marker == JPEG_APP0 + 2
-					&& marker->data_length >= 14
-					&& memcmp(marker->data, "ICC_PROFILE", 12) == 0)
+				if (marker->marker == JPEG_APP0 + 2 && marker->data_length >= 14 && memcmp(marker->data, "ICC_PROFILE", 12) == 0)
 				{
 					if (num_markers == 0)
 					{
@@ -792,13 +906,13 @@ bool CImage::loadFromFileJPEG(const TCHAR* filename)
 		// Determine the image type
 		switch (cinfo.out_color_space)
 		{
-		case JCS_GRAYSCALE:		/* monochrome */
+		case JCS_GRAYSCALE: /* monochrome */
 			m_type = image_mono;
 			break;
-		case JCS_RGB:		/* red/green/blue */
+		case JCS_RGB: /* red/green/blue */
 			m_type = image_rgb;
 			break;
-		case JCS_CMYK:		/* C/M/Y/K */
+		case JCS_CMYK: /* C/M/Y/K */
 			m_type = image_cmyk;
 			break;
 		case JCS_YCbCr:
@@ -810,16 +924,16 @@ bool CImage::loadFromFileJPEG(const TCHAR* filename)
 		}
 
 		// Determine the stride
-		m_stride = (getPixelStride() * m_width + 31) / 32 * 32;
+		m_stride = calculate_jpeg_stride(m_type, m_width);
 
 		// Generate the image buffer
 		delete[] m_data;
-		m_data = new unsigned char[m_stride * m_height];
+		m_data = new unsigned char[checked_image_size(m_stride, m_height, "Invalid JPEG image dimensions")];
 
 		/* read one scan line at a time */
 		for (int y = 0; y < m_height; ++y)
 		{
-			unsigned char* p = m_data + y * m_stride;
+			unsigned char *p = m_data + y * m_stride;
 			jpeg_read_scanlines(&cinfo, &p, 1);
 			if (m_type == image_cmyk)
 			{
@@ -843,7 +957,7 @@ bool CImage::loadFromFileJPEG(const TCHAR* filename)
 	return true;
 }
 
-void CImage::saveToFileJPEG(const TCHAR* filename)
+void CImage::saveToFileJPEG(const TCHAR *filename)
 {
 	struct jpeg_compress_struct cinfo;
 	struct jpeg_error_mgr jerr;
@@ -869,7 +983,7 @@ void CImage::saveToFileJPEG(const TCHAR* filename)
 	}
 
 	// Open the output file
-	FILE* outfile = NULL;
+	FILE *outfile = NULL;
 	_tfopen_s(&outfile, filename, _T("wb"));
 	if (!outfile)
 	{
@@ -909,8 +1023,8 @@ void CImage::saveToFileJPEG(const TCHAR* filename)
 		size_t max_profile_bytes = marker_size - header_size;
 		size_t data_left = m_profile_size;
 		int num_markers = static_cast<int>((m_profile_size + max_profile_bytes - 1) / max_profile_bytes);
-		unsigned char* profile_data = m_profile_data;
-		unsigned char* marker = new unsigned char[marker_size];
+		unsigned char *profile_data = m_profile_data;
+		unsigned char *marker = new unsigned char[marker_size];
 		memcpy(marker, "ICC_PROFILE", 12);
 		while (data_left > 0)
 		{
@@ -930,17 +1044,17 @@ void CImage::saveToFileJPEG(const TCHAR* filename)
 	}
 
 	// Get the data
-	unsigned char* data = lockData(true);
+	unsigned char *data = lockData(true);
 
 	if (isBGR())
 	{
 		// If this is BGR, then we must invert the numbers
 		// before submitting to the write_scanline function
 		size_t pixel_stride = getPixelStride();
-		unsigned char* bgr_buffer = new unsigned char[m_stride];
+		unsigned char *bgr_buffer = new unsigned char[m_stride];
 		while (cinfo.next_scanline < cinfo.image_height)
 		{
-			unsigned char* p = data + cinfo.next_scanline * m_stride;
+			unsigned char *p = data + cinfo.next_scanline * m_stride;
 			size_t j = 0;
 			for (size_t i = 0; i < m_stride; i += pixel_stride)
 			{
@@ -959,10 +1073,10 @@ void CImage::saveToFileJPEG(const TCHAR* filename)
 	{
 		// If this is RGBA, then we must ignore the A channel
 		size_t pixel_stride = getPixelStride();
-		unsigned char* bgr_buffer = new unsigned char[m_stride];
+		unsigned char *bgr_buffer = new unsigned char[m_stride];
 		while (cinfo.next_scanline < cinfo.image_height)
 		{
-			unsigned char* p = data + cinfo.next_scanline * m_stride;
+			unsigned char *p = data + cinfo.next_scanline * m_stride;
 			size_t j = 0;
 			for (size_t i = 0; i < m_stride; i += pixel_stride)
 			{
@@ -981,10 +1095,10 @@ void CImage::saveToFileJPEG(const TCHAR* filename)
 	{
 		// If this is CMYK, then we must invert the numbers
 		// before submitting to the write_scanline function
-		unsigned char* cmyk_buffer = new unsigned char[m_stride];
+		unsigned char *cmyk_buffer = new unsigned char[m_stride];
 		while (cinfo.next_scanline < cinfo.image_height)
 		{
-			unsigned char* p = data + cinfo.next_scanline * m_stride;
+			unsigned char *p = data + cinfo.next_scanline * m_stride;
 			for (size_t i = 0; i < m_stride; ++i)
 			{
 				cmyk_buffer[i] = 255 - p[i];
@@ -997,7 +1111,7 @@ void CImage::saveToFileJPEG(const TCHAR* filename)
 	{
 		while (cinfo.next_scanline < cinfo.image_height)
 		{
-			unsigned char* p = data + cinfo.next_scanline * m_stride;
+			unsigned char *p = data + cinfo.next_scanline * m_stride;
 			jpeg_write_scanlines(&cinfo, &p, 1);
 		}
 	}
@@ -1010,7 +1124,7 @@ void CImage::saveToFileJPEG(const TCHAR* filename)
 	fclose(outfile);
 }
 
-static bool SafeFread(char* buffer, int size, int number, FILE* fp)
+static bool SafeFread(char *buffer, int size, int number, FILE *fp)
 {
 	int ItemsRead;
 	if (feof(fp))
@@ -1023,9 +1137,9 @@ static bool SafeFread(char* buffer, int size, int number, FILE* fp)
 }
 
 // Create this image from a file
-bool CImage::loadFromFileBMP(const TCHAR* filename)
+bool CImage::loadFromFileBMP(const TCHAR *filename)
 {
-	FILE* fp = NULL;
+	FILE *fp = NULL;
 	_tfopen_s(&fp, filename, _T("rb"));
 	if (fp == NULL)
 	{
@@ -1038,7 +1152,7 @@ bool CImage::loadFromFileBMP(const TCHAR* filename)
 	BMFH bmfh;
 	bool NotCorrupted = true;
 
-	NotCorrupted &= SafeFread((char*)&(bmfh.bfType), sizeof(uint16_t), 1, fp);
+	NotCorrupted &= SafeFread((char *)&(bmfh.bfType), sizeof(uint16_t), 1, fp);
 
 	// Is this a bitmap?
 	if (bmfh.bfType != 19778)
@@ -1047,25 +1161,25 @@ bool CImage::loadFromFileBMP(const TCHAR* filename)
 		return false;
 	}
 
-	NotCorrupted &= SafeFread((char*)&(bmfh.bfSize), sizeof(uint32_t), 1, fp);
-	NotCorrupted &= SafeFread((char*)&(bmfh.bfReserved1), sizeof(uint16_t), 1, fp);
-	NotCorrupted &= SafeFread((char*)&(bmfh.bfReserved2), sizeof(uint16_t), 1, fp);
-	NotCorrupted &= SafeFread((char*)&(bmfh.bfOffBits), sizeof(uint32_t), 1, fp);
+	NotCorrupted &= SafeFread((char *)&(bmfh.bfSize), sizeof(uint32_t), 1, fp);
+	NotCorrupted &= SafeFread((char *)&(bmfh.bfReserved1), sizeof(uint16_t), 1, fp);
+	NotCorrupted &= SafeFread((char *)&(bmfh.bfReserved2), sizeof(uint16_t), 1, fp);
+	NotCorrupted &= SafeFread((char *)&(bmfh.bfOffBits), sizeof(uint32_t), 1, fp);
 
 	// read the info header
 	BMIH bmih;
-	NotCorrupted &= SafeFread((char*)&(bmih.biSize), sizeof(uint32_t), 1, fp);
-	NotCorrupted &= SafeFread((char*)&(bmih.biWidth), sizeof(uint32_t), 1, fp);
-	NotCorrupted &= SafeFread((char*)&(bmih.biHeight), sizeof(uint32_t), 1, fp);
-	NotCorrupted &= SafeFread((char*)&(bmih.biPlanes), sizeof(uint16_t), 1, fp);
-	NotCorrupted &= SafeFread((char*)&(bmih.biBitCount), sizeof(uint16_t), 1, fp);
+	NotCorrupted &= SafeFread((char *)&(bmih.biSize), sizeof(uint32_t), 1, fp);
+	NotCorrupted &= SafeFread((char *)&(bmih.biWidth), sizeof(uint32_t), 1, fp);
+	NotCorrupted &= SafeFread((char *)&(bmih.biHeight), sizeof(uint32_t), 1, fp);
+	NotCorrupted &= SafeFread((char *)&(bmih.biPlanes), sizeof(uint16_t), 1, fp);
+	NotCorrupted &= SafeFread((char *)&(bmih.biBitCount), sizeof(uint16_t), 1, fp);
 
-	NotCorrupted &= SafeFread((char*)&(bmih.biCompression), sizeof(uint32_t), 1, fp);
-	NotCorrupted &= SafeFread((char*)&(bmih.biSizeImage), sizeof(uint32_t), 1, fp);
-	NotCorrupted &= SafeFread((char*)&(bmih.biXPelsPerMeter), sizeof(uint32_t), 1, fp);
-	NotCorrupted &= SafeFread((char*)&(bmih.biYPelsPerMeter), sizeof(uint32_t), 1, fp);
-	NotCorrupted &= SafeFread((char*)&(bmih.biClrUsed), sizeof(uint32_t), 1, fp);
-	NotCorrupted &= SafeFread((char*)&(bmih.biClrImportant), sizeof(uint32_t), 1, fp);
+	NotCorrupted &= SafeFread((char *)&(bmih.biCompression), sizeof(uint32_t), 1, fp);
+	NotCorrupted &= SafeFread((char *)&(bmih.biSizeImage), sizeof(uint32_t), 1, fp);
+	NotCorrupted &= SafeFread((char *)&(bmih.biXPelsPerMeter), sizeof(uint32_t), 1, fp);
+	NotCorrupted &= SafeFread((char *)&(bmih.biYPelsPerMeter), sizeof(uint32_t), 1, fp);
+	NotCorrupted &= SafeFread((char *)&(bmih.biClrUsed), sizeof(uint32_t), 1, fp);
+	NotCorrupted &= SafeFread((char *)&(bmih.biClrImportant), sizeof(uint32_t), 1, fp);
 
 	if (!NotCorrupted)
 	{
@@ -1104,6 +1218,14 @@ bool CImage::loadFromFileBMP(const TCHAR* filename)
 		throw jett_exception(JETT_INVALID_BITMAP, 0, "Invalid size for BMP image");
 	}
 
+	if (bmih.biHeight == 0 || bmih.biHeight == std::numeric_limits<int32_t>::min())
+	{
+		fclose(fp);
+		throw jett_exception(JETT_INVALID_BITMAP, 0, "Invalid size for BMP image");
+	}
+
+	const unsigned int bitmap_height = static_cast<unsigned int>(bmih.biHeight < 0 ? -static_cast<int64_t>(bmih.biHeight) : bmih.biHeight);
+
 	// if < 16 bits, read the palette
 	RGBApixel Colors[256];
 	memset(Colors, 0, sizeof(Colors));
@@ -1118,9 +1240,8 @@ bool CImage::loadFromFileBMP(const TCHAR* filename)
 
 		for (int n = 0; n < NumberOfColorsToRead; n++)
 		{
-			SafeFread((char*)&(Colors[n]), 4, 1, fp);
-			mono_image &= Colors[n].Red == Colors[n].Green
-				&& Colors[n].Red == Colors[n].Blue;
+			SafeFread((char *)&(Colors[n]), 4, 1, fp);
+			mono_image &= Colors[n].Red == Colors[n].Green && Colors[n].Red == Colors[n].Blue;
 		}
 	}
 
@@ -1132,18 +1253,18 @@ bool CImage::loadFromFileBMP(const TCHAR* filename)
 	case 8:
 		if (mono_image)
 		{
-			createImage(bmih.biWidth, abs(bmih.biHeight), image_mono, false, m_mode);
+			createImage(static_cast<unsigned int>(bmih.biWidth), bitmap_height, image_mono, false, m_mode);
 		}
 		else
 		{
-			createImage(bmih.biWidth, abs(bmih.biHeight), image_bgra, false, m_mode);
+			createImage(static_cast<unsigned int>(bmih.biWidth), bitmap_height, image_bgra, false, m_mode);
 		}
 		break;
 	case 24:
-		createImage(bmih.biWidth, abs(bmih.biHeight), image_bgr, false, m_mode);
+		createImage(static_cast<unsigned int>(bmih.biWidth), bitmap_height, image_bgr, false, m_mode);
 		break;
 	case 32:
-		createImage(bmih.biWidth, abs(bmih.biHeight), image_bgra, false, m_mode);
+		createImage(static_cast<unsigned int>(bmih.biWidth), bitmap_height, image_bgra, false, m_mode);
 		break;
 	default:
 		// Note: we don't support 16bpp BMP files as they are silly
@@ -1158,15 +1279,24 @@ bool CImage::loadFromFileBMP(const TCHAR* filename)
 	{
 		// This code reads 8, 24 or 32 bpp data directly where the image size and desintation
 		// size are the same
-		fread(m_data, 1, m_height * m_stride, fp);
+		const size_t bitmap_size = checked_image_size(m_stride, m_height, "Invalid BMP image dimensions");
+		if (fread(m_data, 1, bitmap_size, fp) != bitmap_size)
+		{
+			fclose(fp);
+			throw jett_exception(JETT_INVALID_BITMAP, 0, "Invalid BMP image data");
+		}
 	}
 	else if (getPixelStride() * 8 == bmih.biBitCount && bmih.biHeight >= 0)
 	{
 		// positive height indicates that the image is inverted
 		for (int y = m_height - 1; y >= 0 && !feof(fp); --y)
 		{
-			unsigned char* p = m_data + y * m_stride;
-			fread(p, 1, m_stride, fp);
+			unsigned char *p = m_data + y * m_stride;
+			if (fread(p, 1, m_stride, fp) != m_stride)
+			{
+				fclose(fp);
+				throw jett_exception(JETT_INVALID_BITMAP, 0, "Invalid BMP image data");
+			}
 		}
 	}
 	else
@@ -1176,13 +1306,13 @@ bool CImage::loadFromFileBMP(const TCHAR* filename)
 		int pixels_per_byte = 8 / bmih.biBitCount;
 		int bytes_per_row = (m_width * bmih.biBitCount + 7) / 8;
 		bytes_per_row = (bytes_per_row + 3) / 4 * 4;
-		unsigned char* buffer = new unsigned char[bytes_per_row];
+		unsigned char *buffer = new unsigned char[bytes_per_row];
 
 		if (mono_image)
 		{
 			for (int y = 0; y < m_height && !feof(fp); ++y)
 			{
-				unsigned char* p;
+				unsigned char *p;
 				if (bmih.biHeight > 0)
 				{
 					p = m_data + (m_height - y - 1) * m_stride;
@@ -1191,18 +1321,25 @@ bool CImage::loadFromFileBMP(const TCHAR* filename)
 				{
 					p = m_data + y * m_stride;
 				}
-				fread(buffer, 1, bytes_per_row, fp);
+				if (!SafeFread((char *)buffer, 1, bytes_per_row, fp))
+				{
+					delete[] buffer;
+					fclose(fp);
+					throw jett_exception(JETT_INVALID_BITMAP, 0, "Invalid BMP image data");
+				}
 
 				// Convert...
-				for (int x = 0; x < bytes_per_row; ++x)
+				size_t pixel = 0;
+				for (int x = 0; x < bytes_per_row && pixel < static_cast<size_t>(m_width); ++x)
 				{
 					int shift = 8 - bmih.biBitCount;
-					for (int px = 0; px < pixels_per_byte; ++px)
+					for (int px = 0; px < pixels_per_byte && pixel < static_cast<size_t>(m_width); ++px)
 					{
-						int b = (buffer[x] >> shift) & mask;
-						*p = Colors[b].Red;
+						const int index = (buffer[x] >> shift) & mask;
+						*p = Colors[index].Red;
 						++p;
-						b -= bmih.biBitCount;
+						shift -= bmih.biBitCount;
+						++pixel;
 					}
 				}
 			}
@@ -1212,7 +1349,7 @@ bool CImage::loadFromFileBMP(const TCHAR* filename)
 			// RGBA image
 			for (int y = 0; y < m_height && !feof(fp); ++y)
 			{
-				unsigned char* p;
+				unsigned char *p;
 				if (bmih.biHeight > 0)
 				{
 					p = m_data + (m_height - y - 1) * m_stride;
@@ -1221,24 +1358,31 @@ bool CImage::loadFromFileBMP(const TCHAR* filename)
 				{
 					p = m_data + y * m_stride;
 				}
-				fread(buffer, 1, bytes_per_row, fp);
+				if (!SafeFread((char *)buffer, 1, bytes_per_row, fp))
+				{
+					delete[] buffer;
+					fclose(fp);
+					throw jett_exception(JETT_INVALID_BITMAP, 0, "Invalid BMP image data");
+				}
 
 				// Convert...
-				for (int x = 0; x < bytes_per_row; ++x)
+				size_t pixel = 0;
+				for (int x = 0; x < bytes_per_row && pixel < static_cast<size_t>(m_width); ++x)
 				{
 					int shift = 8 - bmih.biBitCount;
-					for (int px = 0; px < pixels_per_byte; ++px)
+					for (int px = 0; px < pixels_per_byte && pixel < static_cast<size_t>(m_width); ++px)
 					{
-						int b = buffer[x] >> shift;
-						*p = Colors[b].Blue;
+						const int index = (buffer[x] >> shift) & mask;
+						*p = Colors[index].Blue;
 						++p;
-						*p = Colors[b].Green;
+						*p = Colors[index].Green;
 						++p;
-						*p = Colors[b].Red;
+						*p = Colors[index].Red;
 						++p;
-						*p = Colors[b].Alpha;
+						*p = Colors[index].Alpha;
 						++p;
-						b -= bmih.biBitCount;
+						shift -= bmih.biBitCount;
+						++pixel;
 					}
 				}
 			}
@@ -1252,7 +1396,7 @@ bool CImage::loadFromFileBMP(const TCHAR* filename)
 	return true;
 }
 
-void CImage::saveToFileBMP(const TCHAR* filename)
+void CImage::saveToFileBMP(const TCHAR *filename)
 {
 	int BitDepth = 8;
 	switch (m_type)
@@ -1285,7 +1429,7 @@ void CImage::saveToFileBMP(const TCHAR* filename)
 	}
 
 	// Open the image file
-	FILE* fp = NULL;
+	FILE *fp = NULL;
 	_tfopen_s(&fp, filename, _T("wb"));
 	if (!fp)
 	{
@@ -1311,11 +1455,11 @@ void CImage::saveToFileBMP(const TCHAR* filename)
 	bmfh.bfReserved2 = 0;
 	bmfh.bfOffBits = (uint32_t)(14 + 40 + dPaletteSize);
 
-	fwrite((char*)&(bmfh.bfType), sizeof(uint16_t), 1, fp);
-	fwrite((char*)&(bmfh.bfSize), sizeof(uint32_t), 1, fp);
-	fwrite((char*)&(bmfh.bfReserved1), sizeof(uint16_t), 1, fp);
-	fwrite((char*)&(bmfh.bfReserved2), sizeof(uint16_t), 1, fp);
-	fwrite((char*)&(bmfh.bfOffBits), sizeof(uint32_t), 1, fp);
+	fwrite((char *)&(bmfh.bfType), sizeof(uint16_t), 1, fp);
+	fwrite((char *)&(bmfh.bfSize), sizeof(uint32_t), 1, fp);
+	fwrite((char *)&(bmfh.bfReserved1), sizeof(uint16_t), 1, fp);
+	fwrite((char *)&(bmfh.bfReserved2), sizeof(uint16_t), 1, fp);
+	fwrite((char *)&(bmfh.bfOffBits), sizeof(uint32_t), 1, fp);
 
 	// write the info header
 	BMIH bmih;
@@ -1357,17 +1501,17 @@ void CImage::saveToFileBMP(const TCHAR* filename)
 	}
 
 	// Get the data
-	unsigned char* data = lockData(true);
+	unsigned char *data = lockData(true);
 
 	// write the pixels
 	if (BitDepth > 8 && !isBGR())
 	{
-		unsigned char* rgb_buffer = new unsigned char[m_stride];
+		unsigned char *rgb_buffer = new unsigned char[m_stride];
 		size_t pixel_stride = getPixelStride();
 
 		for (int y = m_height - 1; y >= 0; --y)
 		{
-			unsigned char* line = data + (y * m_stride);
+			unsigned char *line = data + (y * m_stride);
 
 			if (BitDepth == 24)
 			{
@@ -1399,7 +1543,7 @@ void CImage::saveToFileBMP(const TCHAR* filename)
 	{
 		for (int y = m_height - 1; y >= 0; --y)
 		{
-			unsigned char* line = data + (y * m_stride);
+			unsigned char *line = data + (y * m_stride);
 			fwrite(line, getStride(), 1, fp);
 		}
 	}
@@ -1410,13 +1554,13 @@ void CImage::saveToFileBMP(const TCHAR* filename)
 	fclose(fp);
 }
 
-bool CImage::loadFromFilePNG(const TCHAR* filename)
+bool CImage::loadFromFilePNG(const TCHAR *filename)
 {
-	png_byte header[8];    // 8 is the maximum size that can be checked
+	png_byte header[8]; // 8 is the maximum size that can be checked
 	bool is_sixteen_bpp = false;
 
 	/* open file and test for it being a png */
-	FILE* fp = NULL;
+	FILE *fp = NULL;
 	_tfopen_s(&fp, filename, _T("rb"));
 	if (!fp)
 	{
@@ -1461,8 +1605,9 @@ bool CImage::loadFromFilePNG(const TCHAR* filename)
 	png_read_info(png_ptr, info_ptr);
 
 	// Read the image size
-	m_width = png_get_image_width(png_ptr, info_ptr);
-	m_height = png_get_image_height(png_ptr, info_ptr);
+	validate_loaded_dimensions(png_get_image_width(png_ptr, info_ptr), png_get_image_height(png_ptr, info_ptr), "Invalid PNG image dimensions");
+	m_width = static_cast<int>(png_get_image_width(png_ptr, info_ptr));
+	m_height = static_cast<int>(png_get_image_height(png_ptr, info_ptr));
 
 	// Set the clipping rectangle
 	m_clip_x1 = 0;
@@ -1558,9 +1703,17 @@ bool CImage::loadFromFilePNG(const TCHAR* filename)
 	}
 
 	// Allocate memory
-	m_data = new unsigned char[m_height * m_stride];
+	m_data = new unsigned char[checked_image_size(m_stride, m_height, "Invalid PNG image dimensions")];
 
-	png_bytep* row_pointers = new png_bytep[m_height];
+	size_t row_pointer_bytes = 0;
+	if (!checked_mul_size(static_cast<size_t>(m_height), sizeof(png_bytep), row_pointer_bytes))
+	{
+		png_destroy_read_struct(&png_ptr, &info_ptr, NULL);
+		fclose(fp);
+		throw jett_exception(JETT_INVALID_BITMAP, 0, "Invalid PNG image dimensions");
+	}
+
+	png_bytep *row_pointers = static_cast<png_bytep *>(png_malloc(png_ptr, row_pointer_bytes));
 	for (int i = 0; i < m_height; ++i)
 	{
 		row_pointers[i] = (png_bytep)(m_data + i * m_stride);
@@ -1568,15 +1721,16 @@ bool CImage::loadFromFilePNG(const TCHAR* filename)
 
 	png_read_image(png_ptr, row_pointers);
 
-	delete[] row_pointers;
+	png_free(png_ptr, row_pointers);
 
 	png_read_end(png_ptr, NULL);
+	png_destroy_read_struct(&png_ptr, &info_ptr, NULL);
 	fclose(fp);
 
 	return true;
 }
 
-void CImage::saveToFilePNG(const TCHAR* filename)
+void CImage::saveToFilePNG(const TCHAR *filename)
 {
 	int png_color_type = 0;
 	switch (m_type)
@@ -1605,7 +1759,7 @@ void CImage::saveToFilePNG(const TCHAR* filename)
 	}
 
 	// Open the image file
-	FILE* outfile = NULL;
+	FILE *outfile = NULL;
 	_tfopen_s(&outfile, filename, _T("wb"));
 	if (!outfile)
 	{
@@ -1614,7 +1768,7 @@ void CImage::saveToFilePNG(const TCHAR* filename)
 
 	png_structp png_ptr = NULL;
 	png_infop info_ptr = NULL;
-	png_byte** row_pointers = NULL;
+	png_byte **row_pointers = NULL;
 
 	// Initialize the write struct
 	png_ptr = png_create_write_struct(PNG_LIBPNG_VER_STRING, NULL, NULL, NULL);
@@ -1643,14 +1797,14 @@ void CImage::saveToFilePNG(const TCHAR* filename)
 
 	// Set image attributes
 	png_set_IHDR(png_ptr,
-		info_ptr,
-		m_width,
-		m_height,
-		m_16bpp ? 16 : 8,
-		png_color_type,
-		PNG_INTERLACE_NONE,
-		PNG_COMPRESSION_TYPE_DEFAULT,
-		PNG_FILTER_TYPE_DEFAULT);
+				 info_ptr,
+				 m_width,
+				 m_height,
+				 m_16bpp ? 16 : 8,
+				 png_color_type,
+				 PNG_INTERLACE_NONE,
+				 PNG_COMPRESSION_TYPE_DEFAULT,
+				 PNG_FILTER_TYPE_DEFAULT);
 
 	// Take into account BGR images
 	if (isBGR())
@@ -1671,10 +1825,10 @@ void CImage::saveToFilePNG(const TCHAR* filename)
 	}
 
 	// Get the data
-	unsigned char* data = lockData(true);
+	unsigned char *data = lockData(true);
 
 	/// Initialize rows of PNG
-	row_pointers = static_cast<png_byte**>(png_malloc(png_ptr, m_height * sizeof(png_byte*)));
+	row_pointers = static_cast<png_byte **>(png_malloc(png_ptr, m_height * sizeof(png_byte *)));
 	for (int y = 0; y < m_height; ++y)
 	{
 		row_pointers[y] = data + y * getStride();
@@ -1741,12 +1895,12 @@ int CImage::getComponents() const
 }
 
 // Save this image to file
-void CImage::saveToFileTIFF(const TCHAR* filename)
+void CImage::saveToFileTIFF(const TCHAR *filename)
 {
 #ifdef UNICODE
-	TIFF* dif = TIFFOpenW(filename, "w");
+	TIFF *dif = TIFFOpenW(filename, "w");
 #else
-	TIFF* dif = TIFFOpen(filename, "w");
+	TIFF *dif = TIFFOpen(filename, "w");
 #endif
 
 	if (!dif)
@@ -1755,7 +1909,7 @@ void CImage::saveToFileTIFF(const TCHAR* filename)
 	}
 
 	// Download the image data
-	unsigned char* data = lockData(true);
+	unsigned char *data = lockData(true);
 
 	try
 	{
@@ -1771,7 +1925,7 @@ void CImage::saveToFileTIFF(const TCHAR* filename)
 		if (m_type != image_lab && m_profile_data && m_profile_size)
 		{
 			uint32_t EmbedLen = static_cast<uint32_t>(m_profile_size);
-			uint8_t* EmbedBuffer = m_profile_data;
+			uint8_t *EmbedBuffer = m_profile_data;
 			TIFFSetField(dif, TIFFTAG_ICCPROFILE, EmbedLen, EmbedBuffer);
 		}
 
@@ -1815,10 +1969,10 @@ void CImage::saveToFileTIFF(const TCHAR* filename)
 			size_t pixel_stride = getPixelStride();
 			if (m_16bpp)
 			{
-				unsigned short* rgba_buffer = new unsigned short[m_stride];
+				unsigned short *rgba_buffer = new unsigned short[m_stride];
 				for (int y = 0; y < m_height; y++)
 				{
-					unsigned short* line = (unsigned short*)(data + (y * m_stride));
+					unsigned short *line = (unsigned short *)(data + (y * m_stride));
 					for (size_t x = 0; x < m_stride; x += pixel_stride)
 					{
 						// Convert BGRA -> RGBA
@@ -1832,10 +1986,10 @@ void CImage::saveToFileTIFF(const TCHAR* filename)
 			}
 			else
 			{
-				unsigned char* rgba_buffer = new unsigned char[m_stride];
+				unsigned char *rgba_buffer = new unsigned char[m_stride];
 				for (int y = 0; y < m_height; y++)
 				{
-					unsigned char* line = data + (y * m_stride);
+					unsigned char *line = data + (y * m_stride);
 					for (size_t x = 0; x < m_stride; x += pixel_stride)
 					{
 						// Convert BGRA -> RGBA
@@ -1855,11 +2009,11 @@ void CImage::saveToFileTIFF(const TCHAR* filename)
 			size_t pixel_stride = getPixelStride();
 			if (m_16bpp)
 			{
-				unsigned short* rgba_buffer = new unsigned short[4 * m_width];
+				unsigned short *rgba_buffer = new unsigned short[4 * m_width];
 
 				for (int y = 0; y < m_height; y++)
 				{
-					unsigned short* line = (unsigned short*)(data + (y * m_stride));
+					unsigned short *line = (unsigned short *)(data + (y * m_stride));
 					for (size_t x = 0; x < m_stride; x += pixel_stride)
 					{
 						// Convert BGR -> RGBA
@@ -1874,10 +2028,10 @@ void CImage::saveToFileTIFF(const TCHAR* filename)
 			}
 			else
 			{
-				unsigned char* rgba_buffer = new unsigned char[4 * m_width];
+				unsigned char *rgba_buffer = new unsigned char[4 * m_width];
 				for (int y = 0; y < m_height; y++)
 				{
-					unsigned char* line = data + (y * m_stride);
+					unsigned char *line = data + (y * m_stride);
 					for (size_t x = 0; x < m_stride; x += pixel_stride)
 					{
 						// Convert BGR -> RGBA
@@ -1895,7 +2049,7 @@ void CImage::saveToFileTIFF(const TCHAR* filename)
 		default:
 			for (int y = 0; y < m_height; y++)
 			{
-				unsigned char* line = data + (y * m_stride);
+				unsigned char *line = data + (y * m_stride);
 				TIFFWriteScanline(dif, line, static_cast<int>(y));
 			}
 			break;
@@ -1914,7 +2068,7 @@ void CImage::saveToFileTIFF(const TCHAR* filename)
 
 // Upload (if necessary) the image to the GPU and get the
 // pointer to it
-cl_mem CImage::lockCLData(CGPUProcessor* cl, bool read_only)
+cl_mem CImage::lockCLData(CGPUProcessor *cl, bool read_only)
 {
 	if (is_gpu_read_only() && !read_only)
 	{
@@ -1977,7 +2131,7 @@ cl_mem CImage::lockCLData(CGPUProcessor* cl, bool read_only)
 //
 // The GPU is finished with the image
 //
-void CImage::unlockCLData(CGPUProcessor* cl)
+void CImage::unlockCLData(CGPUProcessor *cl)
 {
 	if (is_gpu_discardable())
 	{
@@ -1994,11 +2148,11 @@ void CImage::unlockCLData(CGPUProcessor* cl)
 
 // Get pointers to the CPU version of this bitmap
 // (download & create as necessary)
-unsigned char* CImage::lockData(bool read_only)
+unsigned char *CImage::lockData(bool read_only)
 {
 	if (!m_data || (m_cl && m_cl_data && m_gpu_changed))
 	{
-		size_t bitmap_size = m_stride * m_height;
+		size_t bitmap_size = checked_image_size(m_stride, m_height, "Image dimensions are too large");
 		if (!m_data)
 		{
 			m_data = new unsigned char[bitmap_size];
@@ -2078,7 +2232,7 @@ image_t CImage::getType() const
 
 // Get the embedded profile data
 // (returns NULL if there is none)
-void* CImage::get_profile_data() const
+void *CImage::get_profile_data() const
 {
 	return m_profile_data;
 }
@@ -2089,7 +2243,7 @@ size_t CImage::get_profile_size() const
 }
 
 // Set the embedded profile data
-void CImage::set_profile_data(const TCHAR* filename)
+void CImage::set_profile_data(const TCHAR *filename)
 {
 	// Get rid of the old profile
 	if (m_profile_data)
@@ -2115,7 +2269,7 @@ void CImage::set_profile_data(const TCHAR* filename)
 	}
 
 	// Load the profile data from file
-	FILE* infile = NULL;
+	FILE *infile = NULL;
 	_tfopen_s(&infile, filename, _T("rb"));
 	if (!infile)
 	{
@@ -2124,18 +2278,31 @@ void CImage::set_profile_data(const TCHAR* filename)
 
 	// Get the size of the file
 	fseek(infile, 0, SEEK_END);
-	m_profile_size = ftell(infile);
+	long profile_size = ftell(infile);
+	if (profile_size < 0)
+	{
+		fclose(infile);
+		throw jett_exception(JETT_INVALID_ARGUMENT, 0, "Unable to determine ICC profile size");
+	}
+	m_profile_size = static_cast<size_t>(profile_size);
 	fseek(infile, 0, SEEK_SET);
 
 	// Read in the data
 	m_profile_data = new unsigned char[m_profile_size];
-	fread(m_profile_data, m_profile_size, 1, infile);
+	if (m_profile_size != 0 && fread(m_profile_data, 1, m_profile_size, infile) != m_profile_size)
+	{
+		delete[] m_profile_data;
+		m_profile_data = NULL;
+		m_profile_size = 0;
+		fclose(infile);
+		throw jett_exception(JETT_INVALID_ARGUMENT, 0, "Unable to read ICC profile file");
+	}
 	fclose(infile);
 
 	return;
 }
 
-void CImage::set_profile_data(void* data, size_t size)
+void CImage::set_profile_data(void *data, size_t size)
 {
 	// Get rid of the old profile
 	if (m_profile_data)
@@ -2151,7 +2318,7 @@ void CImage::set_profile_data(void* data, size_t size)
 }
 
 // Get/Set the resolution of this image (in DPI)
-void CImage::get_resolution(int& x, int& y) const
+void CImage::get_resolution(int &x, int &y) const
 {
 	x = m_x_res;
 	y = m_y_res;
@@ -2172,7 +2339,7 @@ void CImage::set_clip_rect(int clip_x1, int clip_y1, int clip_width, int clip_he
 	m_clip_height = clip_height;
 }
 
-void CImage::get_clip_rect(int& clip_x1, int& clip_y1, int& clip_width, int& clip_height) const
+void CImage::get_clip_rect(int &clip_x1, int &clip_y1, int &clip_width, int &clip_height) const
 {
 	clip_x1 = m_clip_x1;
 	clip_y1 = m_clip_y1;
@@ -2180,7 +2347,7 @@ void CImage::get_clip_rect(int& clip_x1, int& clip_y1, int& clip_width, int& cli
 	clip_height = m_clip_height;
 }
 
-void CImage::clipping(int& clip_x1, int& clip_y1, int& clip_x2, int& clip_y2) const
+void CImage::clipping(int &clip_x1, int &clip_y1, int &clip_x2, int &clip_y2) const
 {
 	clip_x1 = std::max(0, m_clip_x1);
 	clip_y1 = std::max(0, m_clip_y1);
@@ -2218,6 +2385,7 @@ void CImage::erase()
 	lockData(false);
 	if (m_data)
 	{
+		const size_t bitmap_size = checked_image_size(m_stride, m_height, "Image dimensions are too large");
 		switch (m_type)
 		{
 		case image_mono1:
@@ -2227,15 +2395,15 @@ void CImage::erase()
 		case image_bgr:
 		case image_rgb:
 		case image_lab:
-			memset(m_data, 255, m_height * m_stride);
+			memset(m_data, 255, bitmap_size);
 			break;
 		case image_cmyk:
 		case image_invalid:
-			memset(m_data, 0, m_height * m_stride);
+			memset(m_data, 0, bitmap_size);
 			break;
 		case image_rgba:
 		case image_bgra:
-			memset(m_data, 255, m_height * m_stride);
+			memset(m_data, 255, bitmap_size);
 			break;
 		default:
 			throw jett_exception(JETT_INVALID_ARGUMENT, 0, "Unsupported image type for erase");

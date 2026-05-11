@@ -5,6 +5,10 @@
 //
 
 
+#if defined(GRAPHICSLIBRARY_EXPORTS) && !defined(JETT_LIBRARY_BUILD)
+#define JETT_LIBRARY_BUILD
+#endif
+
 #ifdef _WIN32
 #include "targetver.h"
 #include <windows.h>

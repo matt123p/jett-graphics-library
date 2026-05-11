@@ -4,7 +4,6 @@
 //  Copyright (c) 2026 Matt Pyne. All rights reserved.
 //
 
-
 #include "StdAfx.h"
 #include "jett.h"
 
@@ -12,84 +11,86 @@
 #include "GPUProcessor.h"
 #include <sstream>
 
+namespace
+{
+	const size_t kMaxKernelBinarySize = 64u * 1024u * 1024u;
+}
 
 // Construction/destruction
 CLProgram::CLProgram()
 {
 	m_pDevice = NULL;
-    m_program = NULL;
+	m_program = NULL;
 }
 
 CLProgram::~CLProgram()
 {
-    free();
+	free();
 }
 
-void CLProgram::create( CGPUProcessor &cl, const unsigned char *program, size_t len, const stringCollection *defs, const char* build_options )
+void CLProgram::create(CGPUProcessor &cl, const unsigned char *program, size_t len, const stringCollection *defs, const char *build_options)
 {
-    String s2;
-    
-    if (defs)
-    {
-        // Compile a list of defs
-        std::ostringstream s;
-        stringCollection::const_iterator i = defs->begin();
-        while (i != defs->end())
-        {
-            s << "#define " << i->first << " " << i->second << "\n";
-            ++ i;
-        }
-        
-		s2 = s.str();
-    }
-    
-    // Create the buffer to put the program in to
-    unsigned char *src = new unsigned char[ len + s2.size() + 1 ];
-    memset(src, 0, len + s2.size() + 1);
-    memcpy( src, s2.c_str(), s2.size() );
+	String s2;
 
-    memcpy( src + s2.size(), program, len );
-    
-    m_pDevice = &cl;
-	m_program = cl.createProgram( src, build_options );
-    
-    delete [] src;
+	if (defs)
+	{
+		// Compile a list of defs
+		std::ostringstream s;
+		stringCollection::const_iterator i = defs->begin();
+		while (i != defs->end())
+		{
+			s << "#define " << i->first << " " << i->second << "\n";
+			++i;
+		}
+
+		s2 = s.str();
+	}
+
+	// Create the buffer to put the program in to
+	unsigned char *src = new unsigned char[len + s2.size() + 1];
+	memset(src, 0, len + s2.size() + 1);
+	memcpy(src, s2.c_str(), s2.size());
+
+	memcpy(src + s2.size(), program, len);
+
+	m_pDevice = &cl;
+	m_program = cl.createProgram(src, build_options);
+
+	delete[] src;
 }
 
 // Destroy this program
 void CLProgram::free()
 {
-    if (m_program)
-    {
-        clReleaseProgram(m_program);
-    }
-    m_program = NULL;
+	if (m_program)
+	{
+		clReleaseProgram(m_program);
+	}
+	m_program = NULL;
 }
 
-
-
 // Create a kernel
-cl_kernel CLProgram::createKernel( const char *kernel_name )
+cl_kernel CLProgram::createKernel(const char *kernel_name)
 {
-    cl_kernel r;
-    
-    int err;
-    r = clCreateKernel(m_program, kernel_name, &err );
-    
-    if (!r || err != CL_SUCCESS)
-    {
-        throw jett_exception(JETT_OPENCL_FAILURE, err, "Failed to create kernel");
-    }
-    
-    return r;
+	cl_kernel r;
+
+	int err;
+	r = clCreateKernel(m_program, kernel_name, &err);
+
+	if (!r || err != CL_SUCCESS)
+	{
+		throw jett_exception(JETT_OPENCL_FAILURE, err, "Failed to create kernel");
+	}
+
+	return r;
 }
 
 // Get the compiled kernel
-void CLProgram::saveKernelBinary( TCHAR *filename )
+void CLProgram::saveKernelBinary(TCHAR *filename)
 {
 	// Get the number of devices that are supported
 	cl_uint program_num_devices;
-	int err = clGetProgramInfo( m_program, CL_PROGRAM_NUM_DEVICES, sizeof(cl_uint), &program_num_devices,NULL);
+	int err = clGetProgramInfo(m_program, CL_PROGRAM_NUM_DEVICES, sizeof(cl_uint), &program_num_devices, NULL);
 	if (err != CL_SUCCESS)
 	{
 		throw jett_exception(JETT_OPENCL_FAILURE, err, "Failed to query program device count");
@@ -102,28 +103,28 @@ void CLProgram::saveKernelBinary( TCHAR *filename )
 	}
 
 	// Get the sizes of the binaries for the devices
-	size_t* binaries_sizes = new size_t[program_num_devices];
-	err = clGetProgramInfo( m_program, CL_PROGRAM_BINARY_SIZES, program_num_devices*sizeof(size_t), binaries_sizes, NULL );
+	size_t *binaries_sizes = new size_t[program_num_devices];
+	err = clGetProgramInfo(m_program, CL_PROGRAM_BINARY_SIZES, program_num_devices * sizeof(size_t), binaries_sizes, NULL);
 	if (err != CL_SUCCESS)
 	{
 		delete[] binaries_sizes;
 		throw jett_exception(JETT_OPENCL_FAILURE, err, "Failed to query program binary sizes");
 	}
 
-	// Now create the array to put the data in to		
-	char **binaries = new char*[program_num_devices];
+	// Now create the array to put the data in to
+	char **binaries = new char *[program_num_devices];
 	for (size_t i = 0; i < program_num_devices; i++)
 	{
-		binaries[i] = new char[binaries_sizes[i]+1];
+		binaries[i] = new char[binaries_sizes[i] + 1];
 	}
-	
+
 	// .. and fetch
-	err = clGetProgramInfo(m_program, CL_PROGRAM_BINARIES, program_num_devices*sizeof(char *), binaries, NULL);
+	err = clGetProgramInfo(m_program, CL_PROGRAM_BINARIES, program_num_devices * sizeof(char *), binaries, NULL);
 	if (err != CL_SUCCESS)
 	{
 		for (size_t i = 0; i < program_num_devices; i++)
 		{
-			delete [] binaries[i];
+			delete[] binaries[i];
 		}
 
 		delete[] binaries;
@@ -131,99 +132,122 @@ void CLProgram::saveKernelBinary( TCHAR *filename )
 		throw jett_exception(JETT_OPENCL_FAILURE, err, "Failed to query program binaries");
 	}
 
-    FILE *fout = NULL;
-	_tfopen_s( &fout, filename,_T("wb"));
-	if ( !fout )
+	FILE *fout = NULL;
+	_tfopen_s(&fout, filename, _T("wb"));
+	if (!fout)
 	{
-        throw jett_exception(JETT_INVALID_ARGUMENT, 0, "Unable to open image file for writing");
+		throw jett_exception(JETT_INVALID_ARGUMENT, 0, "Unable to open image file for writing");
 	}
 
 	// Now save
-	fwrite( &program_num_devices, sizeof(program_num_devices), 1, fout );
+	fwrite(&program_num_devices, sizeof(program_num_devices), 1, fout);
 	for (size_t i = 0; i < program_num_devices; i++)
 	{
-		fwrite( &binaries_sizes[i], sizeof(size_t), 1, fout );
+		fwrite(&binaries_sizes[i], sizeof(size_t), 1, fout);
 	}
 	for (size_t i = 0; i < program_num_devices; i++)
 	{
-		fwrite( binaries[i], 1, binaries_sizes[i], fout );
+		fwrite(binaries[i], 1, binaries_sizes[i], fout);
 	}
-	fclose( fout );
-
+	fclose(fout);
 
 	// Delete memory objects
 	for (size_t i = 0; i < program_num_devices; i++)
 	{
-		delete [] binaries[i];
+		delete[] binaries[i];
 	}
 
 	delete[] binaries;
 	delete[] binaries_sizes;
 }
 
-void CLProgram::loadKernelBinary( TCHAR *filename )
+void CLProgram::loadKernelBinary(TCHAR *filename)
 {
 	if (!m_pDevice)
 	{
 		throw jett_exception(JETT_INTERNAL_ERROR, 0, "Cannot load a kernel binary without an OpenCL device");
 	}
 
-    FILE *fin = NULL;
-	_tfopen_s( &fin, filename,_T("rb"));
-	if ( !fin )
+	FILE *fin = NULL;
+	_tfopen_s(&fin, filename, _T("rb"));
+	if (!fin)
 	{
-        throw jett_exception(JETT_INVALID_ARGUMENT, 0, "Unable to open image file for writing");
+		throw jett_exception(JETT_INVALID_ARGUMENT, 0, "Unable to open kernel binary file for reading");
 	}
 
 	// Now load
 	cl_uint program_num_devices = 0;
-	if (fread( &program_num_devices, sizeof(program_num_devices), 1, fin ) != 1)
+	if (fread(&program_num_devices, sizeof(program_num_devices), 1, fin) != 1)
 	{
-		fclose( fin );
+		fclose(fin);
 		throw jett_exception(JETT_OPENCL_FAILURE, 0, "Failed to read kernel binary file");
 	}
 
-	// Read the sizes
-	size_t* binaries_sizes = new size_t[program_num_devices];
-	for (size_t i = 0; i < program_num_devices; i++)
+	if (program_num_devices != 1)
 	{
-		if (fread( &binaries_sizes[i], sizeof(size_t), 1, fin ) != 1)
-		{
-			fclose( fin );
-			throw jett_exception(JETT_OPENCL_FAILURE, 0, "Failed to read kernel binary file");
-		}
+		fclose(fin);
+		throw jett_exception(JETT_OPENCL_FAILURE, 0, "Only single-device program binaries are supported");
+	}
+
+	// Read the sizes
+	size_t *binaries_sizes = new size_t[1];
+	if (fread(&binaries_sizes[0], sizeof(size_t), 1, fin) != 1)
+	{
+		delete[] binaries_sizes;
+		fclose(fin);
+		throw jett_exception(JETT_OPENCL_FAILURE, 0, "Failed to read kernel binary file");
+	}
+
+	long binary_data_offset = ftell(fin);
+	if (binary_data_offset < 0)
+	{
+		delete[] binaries_sizes;
+		fclose(fin);
+		throw jett_exception(JETT_OPENCL_FAILURE, 0, "Failed to validate kernel binary file");
+	}
+
+	if (fseek(fin, 0, SEEK_END) != 0)
+	{
+		delete[] binaries_sizes;
+		fclose(fin);
+		throw jett_exception(JETT_OPENCL_FAILURE, 0, "Failed to validate kernel binary file");
+	}
+
+	long file_size = ftell(fin);
+	if (file_size < binary_data_offset)
+	{
+		delete[] binaries_sizes;
+		fclose(fin);
+		throw jett_exception(JETT_OPENCL_FAILURE, 0, "Failed to validate kernel binary file");
+	}
+
+	if (fseek(fin, binary_data_offset, SEEK_SET) != 0)
+	{
+		delete[] binaries_sizes;
+		fclose(fin);
+		throw jett_exception(JETT_OPENCL_FAILURE, 0, "Failed to validate kernel binary file");
+	}
+
+	size_t remaining_bytes = static_cast<size_t>(file_size - binary_data_offset);
+	if (binaries_sizes[0] == 0 || binaries_sizes[0] > kMaxKernelBinarySize || binaries_sizes[0] > remaining_bytes)
+	{
+		delete[] binaries_sizes;
+		fclose(fin);
+		throw jett_exception(JETT_OPENCL_FAILURE, 0, "Kernel binary file is invalid or too large");
 	}
 
 	// Read in the binaries
-	char **binaries = new char*[program_num_devices];
-	for (size_t i = 0; i < program_num_devices; i++)
+	char **binaries = new char *[1];
+	binaries[0] = new char[binaries_sizes[0] + 1];
+	if (fread(binaries[0], 1, binaries_sizes[0], fin) != binaries_sizes[0])
 	{
-		binaries[i] = new char[binaries_sizes[i]+1]; 
-		if (fread( binaries[i], 1, binaries_sizes[i], fin ) != binaries_sizes[i])
-		{
-			for (size_t j = 0; j <= i; ++j)
-			{
-				delete [] binaries[j];
-			}
-			delete[] binaries;
-			delete[] binaries_sizes;
-			fclose( fin );
-			throw jett_exception(JETT_OPENCL_FAILURE, 0, "Failed to read kernel binary file");
-		}
-	}
-	fclose( fin );
-
-	if (program_num_devices != 1)
-	{
-		for (size_t i = 0; i < program_num_devices; i++)
-		{
-			delete [] binaries[i];
-		}
-
+		delete[] binaries[0];
 		delete[] binaries;
 		delete[] binaries_sizes;
-		throw jett_exception(JETT_OPENCL_FAILURE, 0, "Only single-device program binaries are supported");
+		fclose(fin);
+		throw jett_exception(JETT_OPENCL_FAILURE, 0, "Failed to read kernel binary file");
 	}
+	fclose(fin);
 
 	cl_device_id device = m_pDevice->get_handle();
 	cl_int binary_status = CL_SUCCESS;
@@ -238,7 +262,7 @@ void CLProgram::loadKernelBinary( TCHAR *filename )
 	// Delete memory objects
 	for (size_t i = 0; i < program_num_devices; i++)
 	{
-		delete [] binaries[i];
+		delete[] binaries[i];
 	}
 
 	delete[] binaries;
@@ -359,5 +383,4 @@ int main()
 	return 0;
 }
 
-	
 #endif

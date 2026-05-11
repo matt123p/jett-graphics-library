@@ -16,6 +16,10 @@
 #ifndef GraphicsLibrary_jett_h
 #define GraphicsLibrary_jett_h
 
+#if defined(GRAPHICSLIBRARY_EXPORTS) && !defined(JETT_LIBRARY_BUILD)
+#define JETT_LIBRARY_BUILD
+#endif
+
 #ifdef _WIN32
 #ifndef DLLEXPORT
 #if defined(JETT_LIBRARY_BUILD)
