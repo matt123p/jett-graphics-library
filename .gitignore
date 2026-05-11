@@ -50,5 +50,6 @@ _ReSharper*/
 packages/
 
 # Generated docs/test output
+/test_images/
 /docs/example images/**
 /docs/_site_test_action/**

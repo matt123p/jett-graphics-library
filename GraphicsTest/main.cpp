@@ -7,18 +7,13 @@
 #include "StdAfx.h"
 #include "timer.h"
 #include "colour_management_tests.h"
-#include "..\GraphicsLibrary\jett.h"
+#include "../GraphicsLibrary/jett.h"
+#include <filesystem>
 #include <math.h>
-#include <errno.h>
+#include <cstdlib>
 #include <set>
+#include <system_error>
 #include <vector>
-
-#ifdef __MACH__
-#include <dirent.h>
-#include <stdlib.h>
-#include <sys/stat.h>
-#include <unistd.h>
-#endif
 
 void build_polygon(jett_point *points, int x, int y, int r, int innerR, int vertexCount, double startAngle);
 
@@ -26,16 +21,14 @@ typedef std::basic_string<TCHAR> output_string;
 
 ////////////////////////////////////////////////////////////////////////////////
 
-#ifdef __MACH__
-#define TEST_IMAGE_ROOT "test_images/"
-#define FONT_FILE "/Library/Fonts/Arial.ttf"
-#else
+#ifdef _WIN32
 #define TEST_IMAGE_ROOT "test_images\\"
-#define CMYK_ICC_DIR "..\\..\\Adobe ICC Profiles\\CMYK Profiles\\"
-#define RGB_ICC_DIR "..\\..\\Adobe ICC Profiles\\RGB Profiles\\"
-#define FONT_FILE "C:\\Windows\\Fonts\\Arial.ttf"
-#define cmyk_test_profile_path() _T(CMYK_ICC_DIR "USWebCoatedSWOP.icc")
-#define rgb_test_profile_path() _T(RGB_ICC_DIR "AdobeRGB1998.icc")
+#define FONT_FILE _T("C:\\Windows\\Fonts\\Arial.ttf")
+#define cmyk_test_profile_path() _T("..\\..\\Adobe ICC Profiles\\CMYK Profiles\\USWebCoatedSWOP.icc")
+#define rgb_test_profile_path() _T("..\\..\\Adobe ICC Profiles\\RGB Profiles\\AdobeRGB1998.icc")
+#else
+#define TEST_IMAGE_ROOT "test_images/"
+#define FONT_FILE test_font_path()
 #endif
 
 #define TEST_ASSET_DIR TEST_IMAGE_ROOT
@@ -46,6 +39,13 @@ typedef std::basic_string<TCHAR> output_string;
 
 namespace
 {
+	namespace fs = std::filesystem;
+
+	output_string path_native_string(const fs::path &path)
+	{
+		return path.native();
+	}
+
 	output_string join_output_path(const output_string &base, const output_string &name)
 	{
 		if (base.empty())
@@ -64,7 +64,11 @@ namespace
 			return base + name;
 		}
 
+	#ifdef _WIN32
 		return base + _T("\\") + name;
+	#else
+		return base + _T("/") + name;
+	#endif
 	}
 
 	void throw_output_error(const char *message)
@@ -72,65 +76,48 @@ namespace
 		throw jett_exception(JETT_INTERNAL_ERROR, 0, message);
 	}
 
-#ifdef __MACH__
+	#ifndef _WIN32
 	bool path_exists(const output_string &path)
 	{
-		return access(path.c_str(), R_OK) == 0;
+		std::error_code error;
+		return fs::exists(fs::path(path), error);
 	}
 
 	bool directory_exists(const output_string &path)
 	{
-		struct stat info;
-		return stat(path.c_str(), &info) == 0 && S_ISDIR(info.st_mode);
+		std::error_code error;
+		return fs::is_directory(fs::path(path), error);
 	}
 
 	bool find_profile_in_tree(const output_string &root, const output_string &profile_name, output_string &resolved_path)
 	{
-		DIR *directory = opendir(root.c_str());
-		if (!directory)
+		std::error_code error;
+		fs::recursive_directory_iterator end;
+		for (fs::recursive_directory_iterator it(fs::path(root), fs::directory_options::skip_permission_denied, error); it != end; it.increment(error))
 		{
-			return false;
-		}
-
-		struct dirent *entry = NULL;
-		while ((entry = readdir(directory)) != NULL)
-		{
-			output_string entry_name = entry->d_name;
-			if (entry_name == _T(".") || entry_name == _T(".."))
+			if (error)
 			{
+				error.clear();
 				continue;
 			}
 
-			output_string candidate = join_output_path(root, entry_name);
-			struct stat info;
-			if (stat(candidate.c_str(), &info) != 0)
+			if (!it->is_regular_file(error))
 			{
+				error.clear();
 				continue;
 			}
 
-			if (S_ISDIR(info.st_mode))
+			if (path_native_string(it->path().filename()) == profile_name)
 			{
-				if (find_profile_in_tree(candidate, profile_name, resolved_path))
-				{
-					closedir(directory);
-					return true;
-				}
-				continue;
-			}
-
-			if (entry_name == profile_name)
-			{
-				resolved_path = candidate;
-				closedir(directory);
+				resolved_path = path_native_string(it->path());
 				return true;
 			}
 		}
 
-		closedir(directory);
 		return false;
 	}
 
-	output_string resolve_standard_profile_path(const TCHAR *profile_name)
+	output_string resolve_standard_profile_path(const std::vector<output_string> &profile_names)
 	{
 		std::vector<output_string> search_roots;
 		const char *home = getenv("HOME");
@@ -138,12 +125,19 @@ namespace
 		{
 			search_roots.push_back(output_string(home) + _T("/Library/ColorSync/Profiles"));
 			search_roots.push_back(output_string(home) + _T("/Library/Application Support/Adobe/Color/Profiles"));
+			search_roots.push_back(output_string(home) + _T("/.local/share/color/icc"));
+			search_roots.push_back(output_string(home) + _T("/.color/icc"));
+			search_roots.push_back(output_string(home) + _T("/.fonts"));
+			search_roots.push_back(output_string(home) + _T("/.local/share/fonts"));
 		}
 
 		search_roots.push_back(_T("/Library/ColorSync/Profiles"));
 		search_roots.push_back(_T("/System/Library/ColorSync/Profiles"));
 		search_roots.push_back(_T("/Network/Library/ColorSync/Profiles"));
 		search_roots.push_back(_T("/Library/Application Support/Adobe/Color/Profiles"));
+		search_roots.push_back(_T("/usr/share/color/icc"));
+		search_roots.push_back(_T("/usr/local/share/color/icc"));
+		search_roots.push_back(_T("/var/lib/color/icc"));
 
 		for (size_t i = 0; i < search_roots.size(); ++i)
 		{
@@ -152,135 +146,182 @@ namespace
 				continue;
 			}
 
-			output_string direct_match = join_output_path(search_roots[i], profile_name);
-			if (path_exists(direct_match))
+			for (size_t profile_index = 0; profile_index < profile_names.size(); ++profile_index)
 			{
-				return direct_match;
-			}
+				output_string direct_match = join_output_path(search_roots[i], profile_names[profile_index]);
+				if (path_exists(direct_match))
+				{
+					return direct_match;
+				}
 
-			output_string recursive_match;
-			if (find_profile_in_tree(search_roots[i], profile_name, recursive_match))
-			{
-				return recursive_match;
+				output_string recursive_match;
+				if (find_profile_in_tree(search_roots[i], profile_names[profile_index], recursive_match))
+				{
+					return recursive_match;
+				}
 			}
 		}
 
-		throw_output_error("Unable to locate required ICC profile in standard macOS locations");
+		throw_output_error("Unable to locate required ICC profile in standard system locations");
+		return output_string();
+	}
+
+	output_string resolve_standard_font_path(const std::vector<output_string> &font_names)
+	{
+		std::vector<output_string> search_roots;
+		const char *home = getenv("HOME");
+		if (home && home[0] != 0)
+		{
+			search_roots.push_back(output_string(home) + _T("/Library/Fonts"));
+			search_roots.push_back(output_string(home) + _T("/.fonts"));
+			search_roots.push_back(output_string(home) + _T("/.local/share/fonts"));
+		}
+
+		search_roots.push_back(_T("/Library/Fonts"));
+		search_roots.push_back(_T("/System/Library/Fonts"));
+		search_roots.push_back(_T("/usr/share/fonts"));
+		search_roots.push_back(_T("/usr/local/share/fonts"));
+
+		for (size_t i = 0; i < search_roots.size(); ++i)
+		{
+			if (!directory_exists(search_roots[i]))
+			{
+				continue;
+			}
+
+			for (size_t font_index = 0; font_index < font_names.size(); ++font_index)
+			{
+				output_string direct_match = join_output_path(search_roots[i], font_names[font_index]);
+				if (path_exists(direct_match))
+				{
+					return direct_match;
+				}
+
+				output_string recursive_match;
+				if (find_profile_in_tree(search_roots[i], font_names[font_index], recursive_match))
+				{
+					return recursive_match;
+				}
+			}
+		}
+
+		throw_output_error("Unable to locate required font in standard system locations");
 		return output_string();
 	}
 
 	const TCHAR *cmyk_test_profile_path()
 	{
-		static output_string path = resolve_standard_profile_path(_T("USWebCoatedSWOP.icc"));
+		static output_string path = resolve_standard_profile_path(std::vector<output_string>{
+			_T("USWebCoatedSWOP.icc"),
+			_T("SWOP_TR005_coated_5.icc"),
+			_T("SWOP_TR003_coated_3.icc"),
+			_T("default_cmyk.icc"),
+			_T("ps_cmyk.icc"),
+			_T("FOGRA39L_coated.icc")
+		});
 		return path.c_str();
 	}
 
 	const TCHAR *rgb_test_profile_path()
 	{
-		static output_string path = resolve_standard_profile_path(_T("AdobeRGB1998.icc"));
+		static output_string path = resolve_standard_profile_path(std::vector<output_string>{
+			_T("AdobeRGB1998.icc"),
+			_T("compatibleWithAdobeRGB1998.icc"),
+			_T("sRGB.icc")
+		});
+		return path.c_str();
+	}
+
+	const TCHAR *test_font_path()
+	{
+		static output_string path = resolve_standard_font_path(std::vector<output_string>{
+			_T("Arial.ttf"),
+			_T("LiberationSans-Regular.ttf"),
+			_T("DejaVuSans.ttf")
+		});
 		return path.c_str();
 	}
 #endif
 
 	void ensure_output_directory(const output_string &path)
 	{
-#ifdef __MACH__
-		if (mkdir(path.c_str(), 0755) == 0 || errno == EEXIST)
+		std::error_code error;
+		if (fs::create_directory(fs::path(path), error) || !error || error == std::errc::file_exists)
 		{
 			return;
 		}
-#else
-		if (CreateDirectory(path.c_str(), NULL) || GetLastError() == ERROR_ALREADY_EXISTS)
-		{
-			return;
-		}
-#endif
 
 		throw_output_error("Unable to create output directory");
 	}
 
-#ifndef __MACH__
 	const int kCompareByteTolerance = 2;
 
 	void clear_output_directory(const output_string &path)
 	{
 		ensure_output_directory(path);
 
-		WIN32_FIND_DATA find_data;
-		HANDLE find = FindFirstFile(join_output_path(path, _T("*")).c_str(), &find_data);
-		if (find == INVALID_HANDLE_VALUE)
+		std::error_code error;
+		for (fs::directory_iterator it(fs::path(path), error); !error && it != fs::directory_iterator(); it.increment(error))
 		{
-			return;
-		}
-
-		do
-		{
-			if ((find_data.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) != 0)
+			if (!it->is_regular_file(error))
 			{
+				error.clear();
 				continue;
 			}
 
-			output_string target = join_output_path(path, find_data.cFileName);
-			DeleteFile(target.c_str());
-		} while (FindNextFile(find, &find_data));
-
-		FindClose(find);
-	}
-
-	FILETIME get_suite_start_marker()
-	{
-		FILETIME file_time;
-		GetSystemTimeAsFileTime(&file_time);
-
-		ULONGLONG ticks = (static_cast<ULONGLONG>(file_time.dwHighDateTime) << 32) | file_time.dwLowDateTime;
-		if (ticks > 10000000ULL)
-		{
-			ticks -= 10000000ULL;
+			fs::remove(it->path(), error);
+			if (error)
+			{
+				throw_output_error("Unable to clear output directory");
+			}
 		}
-
-		file_time.dwHighDateTime = static_cast<DWORD>(ticks >> 32);
-		file_time.dwLowDateTime = static_cast<DWORD>(ticks & 0xffffffff);
-		return file_time;
 	}
 
-	int move_recent_outputs(const output_string &target_dir, const FILETIME &suite_start, std::set<output_string> &output_names)
+	fs::file_time_type get_suite_start_marker()
+	{
+		return fs::file_time_type::clock::now();
+	}
+
+	int move_recent_outputs(const output_string &target_dir, const fs::file_time_type &suite_start, std::set<output_string> &output_names)
 	{
 		ensure_output_directory(target_dir);
 
 		int moved = 0;
-		WIN32_FIND_DATA find_data;
-		HANDLE find = FindFirstFile(join_output_path(_T(EXAMPLES_DIR), _T("*")).c_str(), &find_data);
-		if (find == INVALID_HANDLE_VALUE)
+		std::error_code error;
+		for (fs::directory_iterator it(fs::path(_T(EXAMPLES_DIR)), error); !error && it != fs::directory_iterator(); it.increment(error))
 		{
-			return moved;
-		}
-
-		do
-		{
-			if ((find_data.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) != 0)
+			if (!it->is_regular_file(error))
 			{
+				error.clear();
 				continue;
 			}
 
-			if (CompareFileTime(&find_data.ftLastWriteTime, &suite_start) < 0)
+			if (fs::last_write_time(it->path(), error) < suite_start)
 			{
+				error.clear();
 				continue;
 			}
 
-			output_string source = join_output_path(_T(EXAMPLES_DIR), find_data.cFileName);
-			output_string target = join_output_path(target_dir, find_data.cFileName);
+			output_string source = path_native_string(it->path());
+			output_string target = join_output_path(target_dir, path_native_string(it->path().filename()));
 
-			DeleteFile(target.c_str());
-			if (!MoveFileEx(source.c_str(), target.c_str(), MOVEFILE_COPY_ALLOWED | MOVEFILE_REPLACE_EXISTING))
+			fs::remove(fs::path(target), error);
+			error.clear();
+			fs::rename(fs::path(source), fs::path(target), error);
+			if (error)
 			{
-				throw_output_error("Unable to move generated output file");
+				error.clear();
+				fs::copy_file(fs::path(source), fs::path(target), fs::copy_options::overwrite_existing, error);
+				if (error)
+				{
+					throw_output_error("Unable to move generated output file");
+				}
+				fs::remove(fs::path(source), error);
 			}
 
-			output_names.insert(find_data.cFileName);
+			output_names.insert(path_native_string(it->path().filename()));
 			++moved;
-		} while (FindNextFile(find, &find_data));
-
-		FindClose(find);
+		}
 		return moved;
 	}
 
@@ -398,7 +439,7 @@ namespace
 			}
 			catch (const jett_exception &e)
 			{
-				_tprintf(_T("FAIL compare: %s (load error %S, code=%d subsys=%d)\n"), i->c_str(), e.m_message, e.m_code, e.m_subsys_code);
+				_tprintf(_T("FAIL compare: %s (load error %s, code=%d subsys=%d)\n"), i->c_str(), e.m_message, e.m_code, e.m_subsys_code);
 				++failures;
 			}
 		}
@@ -408,7 +449,6 @@ namespace
 	}
 
 	int run_suite_for_mode(bool use_gpu, const TCHAR *mode_name, std::set<output_string> &output_names);
-#endif
 }
 
 void build_polygon(jett_point *points, int x, int y, int r, int innerR, int vertexCount, double startAngle)
@@ -613,7 +653,7 @@ void example_8(jett &r)
 	CTimer t1;
 	t1.start();
 	r.polygon(image, cmyk_col, points, 12, polygon_best);
-	printf("%lld\n", t1.elapsed());
+	printf("%llu\n", static_cast<unsigned long long>(t1.elapsed()));
 
 	// Save the bitmap for inspection
 	image.saveToFile(EXAMPLES_DIR "008 polygon_example best.tiff");
@@ -1201,7 +1241,7 @@ void build_rectangle(jett_point *points, int x, int y, int width, int height)
 	points[3].y = y + height;
 }
 
-LPTSTR image_type_as_string(image_t type)
+const TCHAR *image_type_as_string(image_t type)
 {
 	/*
 	 * returns the type of image as a string
@@ -1336,7 +1376,11 @@ namespace
 			return base + name;
 		}
 
+	#ifdef _WIN32
 		return base + _T("\\") + name;
+	#else
+		return base + _T("/") + name;
+	#endif
 	}
 
 	std::string narrow_path(const output_string &path)
@@ -1362,17 +1406,11 @@ namespace
 			return;
 		}
 
-#ifdef __MACH__
-		if (mkdir(path.c_str(), 0755) == 0 || errno == EEXIST)
+		std::error_code error;
+		if (fs::create_directory(fs::path(path), error) || !error || error == std::errc::file_exists)
 		{
 			return;
 		}
-#else
-		if (CreateDirectory(path.c_str(), NULL) || GetLastError() == ERROR_ALREADY_EXISTS)
-		{
-			return;
-		}
-#endif
 
 		throw_asset_error("Unable to create generated asset directory");
 	}
@@ -1920,7 +1958,7 @@ namespace
 
 	int run_python_generated_asset_validation()
 	{
-		int result = system("python GraphicsTest/verify_generated_images.py test_images/generated_assets_manifest.tsv");
+		int result = system("python3 GraphicsTest/verify_generated_images.py test_images/generated_assets_manifest.tsv");
 		return result;
 	}
 
@@ -2381,7 +2419,7 @@ void test_s_49(jett &r)
 	}
 }
 
-void screen_inplace(jett &r, jett_screens s[], TCHAR *filein, TCHAR *fileoutroot)
+void screen_inplace(jett &r, jett_screens s[], const TCHAR *filein, const TCHAR *fileoutroot)
 {
 	/*
 	 * test screener in place function:
@@ -2536,7 +2574,7 @@ void test_d_9(jett &r, image_t imagetype)
 		points[1] = jett_point(ix, 220);
 		r.lines(image, colour, 1.0, points, 2, false, 0);
 
-		printf("%lld\n", t1.elapsed());
+		printf("%llu\n", static_cast<unsigned long long>(t1.elapsed()));
 
 		TCHAR filename[256];
 		_tcscpy_s(filename, _T(OUTPUT_DIR));
@@ -2829,7 +2867,6 @@ int run_default_test_suite(jett &r)
 	return failures;
 }
 
-#ifndef __MACH__
 namespace
 {
 	int run_suite_for_mode(bool use_gpu, const TCHAR *mode_name, std::set<output_string> &output_names)
@@ -2839,7 +2876,7 @@ namespace
 		output_string target_dir = join_output_path(_T(EXAMPLES_DIR), mode_name);
 		clear_output_directory(target_dir);
 
-		FILETIME suite_start = get_suite_start_marker();
+		fs::file_time_type suite_start = get_suite_start_marker();
 		int failures = 0;
 		const char *label = use_gpu ? "GPU" : "CPU";
 		srand(1);
@@ -2854,6 +2891,13 @@ namespace
 		}
 		catch (const jett_exception &e)
 		{
+			if (use_gpu && e.m_code == JETT_OPENCL_FAILURE && e.m_subsys_code == -1001)
+			{
+				printf("SKIP %s suite: no OpenCL platform is available on this machine\n", label);
+				output_names.clear();
+				return 0;
+			}
+
 			printf("FAIL %s suite: %s (code=%d subsys=%d)\n", label, e.m_message, e.m_code, e.m_subsys_code);
 			++failures;
 		}
@@ -2875,11 +2919,9 @@ namespace
 		return failures;
 	}
 }
-#endif
 
 int main(int argc, const char *argv[])
 {
-#ifndef __MACH__
 	std::set<output_string> gpu_outputs;
 	std::set<output_string> cpu_outputs;
 	int failures = run_generated_asset_tests();
@@ -2899,9 +2941,13 @@ int main(int argc, const char *argv[])
 		printf("SKIP suites because generated asset tests failed\n");
 	}
 
-	if (failures == 0)
+	if (failures == 0 && !gpu_outputs.empty())
 	{
 		failures += compare_mode_outputs(cpu_outputs, gpu_outputs);
+	}
+	else if (failures == 0)
+	{
+		printf("SKIP compare because no GPU outputs were produced\n");
 	}
 	else
 	{
@@ -2909,20 +2955,6 @@ int main(int argc, const char *argv[])
 	}
 
 	return failures;
-#else
-	int failures = run_generated_asset_tests();
-	failures += run_colour_management_tests();
-	if (failures != 0)
-	{
-		return failures;
-	}
-
-	ensure_output_directory(_T(EXAMPLES_DIR));
-
-	jett r;
-	r.init(true);
-	return run_default_test_suite(r);
-#endif
 
 #if 0
 	test_d_3(r, image_cmyk);

@@ -1,30 +1,34 @@
 #include "StdAfx.h"
 #include "colour_management_tests.h"
 
-#include "..\GraphicsLibrary\jett.h"
+#include "../GraphicsLibrary/jett.h"
 
+#include <filesystem>
+#include <math.h>
 #include <string>
 #include <vector>
+#include <cstdlib>
+#include <system_error>
 
-#ifdef __MACH__
-#include <dirent.h>
-#include <errno.h>
-#include <stdlib.h>
-#include <sys/stat.h>
-#include <unistd.h>
-#define TEST_ASSET_DIR "test_images/"
-#else
+#ifdef _WIN32
 #define TEST_ASSET_DIR "test_images\\"
-#define CMYK_ICC_DIR "..\\..\\Adobe ICC Profiles\\CMYK Profiles\\"
-#define RGB_ICC_DIR "..\\..\\Adobe ICC Profiles\\RGB Profiles\\"
-#define cmyk_test_profile_path() _T(CMYK_ICC_DIR "USWebCoatedSWOP.icc")
-#define rgb_test_profile_path() _T(RGB_ICC_DIR "AdobeRGB1998.icc")
+#define cmyk_test_profile_path() _T("..\\..\\Adobe ICC Profiles\\CMYK Profiles\\USWebCoatedSWOP.icc")
+#define rgb_test_profile_path() _T("..\\..\\Adobe ICC Profiles\\RGB Profiles\\AdobeRGB1998.icc")
+#else
+#define TEST_ASSET_DIR "test_images/"
 #endif
 
 typedef std::basic_string<TCHAR> output_string;
 
 namespace
 {
+	namespace fs = std::filesystem;
+
+	output_string path_native_string(const fs::path &path)
+	{
+		return path.native();
+	}
+
 	output_string join_generated_path(const output_string &base, const output_string &name)
 	{
 		if (base.empty())
@@ -43,7 +47,11 @@ namespace
 			return base + name;
 		}
 
+	#ifdef _WIN32
 		return base + _T("\\") + name;
+	#else
+		return base + _T("/") + name;
+	#endif
 	}
 
 	std::string narrow_path(const output_string &path)
@@ -62,65 +70,48 @@ namespace
 		throw jett_exception(JETT_INTERNAL_ERROR, 0, message);
 	}
 
-#ifdef __MACH__
+	#ifndef _WIN32
 	bool path_exists(const output_string &path)
 	{
-		return access(path.c_str(), R_OK) == 0;
+		std::error_code error;
+		return fs::exists(fs::path(path), error);
 	}
 
 	bool directory_exists(const output_string &path)
 	{
-		struct stat info;
-		return stat(path.c_str(), &info) == 0 && S_ISDIR(info.st_mode);
+		std::error_code error;
+		return fs::is_directory(fs::path(path), error);
 	}
 
 	bool find_profile_in_tree(const output_string &root, const output_string &profile_name, output_string &resolved_path)
 	{
-		DIR *directory = opendir(root.c_str());
-		if (!directory)
+		std::error_code error;
+		fs::recursive_directory_iterator end;
+		for (fs::recursive_directory_iterator it(fs::path(root), fs::directory_options::skip_permission_denied, error); it != end; it.increment(error))
 		{
-			return false;
-		}
-
-		struct dirent *entry = NULL;
-		while ((entry = readdir(directory)) != NULL)
-		{
-			output_string entry_name = entry->d_name;
-			if (entry_name == _T(".") || entry_name == _T(".."))
+			if (error)
 			{
+				error.clear();
 				continue;
 			}
 
-			output_string candidate = join_generated_path(root, entry_name);
-			struct stat info;
-			if (stat(candidate.c_str(), &info) != 0)
+			if (!it->is_regular_file(error))
 			{
+				error.clear();
 				continue;
 			}
 
-			if (S_ISDIR(info.st_mode))
+			if (path_native_string(it->path().filename()) == profile_name)
 			{
-				if (find_profile_in_tree(candidate, profile_name, resolved_path))
-				{
-					closedir(directory);
-					return true;
-				}
-				continue;
-			}
-
-			if (entry_name == profile_name)
-			{
-				resolved_path = candidate;
-				closedir(directory);
+				resolved_path = path_native_string(it->path());
 				return true;
 			}
 		}
 
-		closedir(directory);
 		return false;
 	}
 
-	output_string resolve_standard_profile_path(const TCHAR *profile_name)
+	output_string resolve_standard_profile_path(const std::vector<output_string> &profile_names)
 	{
 		std::vector<output_string> search_roots;
 		const char *home = getenv("HOME");
@@ -128,12 +119,18 @@ namespace
 		{
 			search_roots.push_back(output_string(home) + _T("/Library/ColorSync/Profiles"));
 			search_roots.push_back(output_string(home) + _T("/Library/Application Support/Adobe/Color/Profiles"));
+			search_roots.push_back(output_string(home) + _T("/.local/share/color/icc"));
+			search_roots.push_back(output_string(home) + _T("/.color/icc"));
+			search_roots.push_back(output_string(home) + _T("/.fonts"));
 		}
 
 		search_roots.push_back(_T("/Library/ColorSync/Profiles"));
 		search_roots.push_back(_T("/System/Library/ColorSync/Profiles"));
 		search_roots.push_back(_T("/Network/Library/ColorSync/Profiles"));
 		search_roots.push_back(_T("/Library/Application Support/Adobe/Color/Profiles"));
+		search_roots.push_back(_T("/usr/share/color/icc"));
+		search_roots.push_back(_T("/usr/local/share/color/icc"));
+		search_roots.push_back(_T("/var/lib/color/icc"));
 
 		for (size_t i = 0; i < search_roots.size(); ++i)
 		{
@@ -142,32 +139,46 @@ namespace
 				continue;
 			}
 
-			output_string direct_match = join_generated_path(search_roots[i], profile_name);
-			if (path_exists(direct_match))
+			for (size_t profile_index = 0; profile_index < profile_names.size(); ++profile_index)
 			{
-				return direct_match;
-			}
+				output_string direct_match = join_generated_path(search_roots[i], profile_names[profile_index]);
+				if (path_exists(direct_match))
+				{
+					return direct_match;
+				}
 
-			output_string recursive_match;
-			if (find_profile_in_tree(search_roots[i], profile_name, recursive_match))
-			{
-				return recursive_match;
+				output_string recursive_match;
+				if (find_profile_in_tree(search_roots[i], profile_names[profile_index], recursive_match))
+				{
+					return recursive_match;
+				}
 			}
 		}
 
-		throw_colour_management_error("Unable to locate required ICC profile in standard macOS locations");
+		throw_colour_management_error("Unable to locate required ICC profile in standard system locations");
 		return output_string();
 	}
 
 	const TCHAR *cmyk_test_profile_path()
 	{
-		static output_string path = resolve_standard_profile_path(_T("USWebCoatedSWOP.icc"));
+		static output_string path = resolve_standard_profile_path(std::vector<output_string>{
+			_T("USWebCoatedSWOP.icc"),
+			_T("SWOP_TR005_coated_5.icc"),
+			_T("SWOP_TR003_coated_3.icc"),
+			_T("default_cmyk.icc"),
+			_T("ps_cmyk.icc"),
+			_T("FOGRA39L_coated.icc")
+		});
 		return path.c_str();
 	}
 
 	const TCHAR *rgb_test_profile_path()
 	{
-		static output_string path = resolve_standard_profile_path(_T("AdobeRGB1998.icc"));
+		static output_string path = resolve_standard_profile_path(std::vector<output_string>{
+			_T("AdobeRGB1998.icc"),
+			_T("compatibleWithAdobeRGB1998.icc"),
+			_T("sRGB.icc")
+		});
 		return path.c_str();
 	}
 #endif
@@ -179,17 +190,11 @@ namespace
 			return;
 		}
 
-#ifdef __MACH__
-		if (mkdir(path.c_str(), 0755) == 0 || errno == EEXIST)
+		std::error_code error;
+		if (fs::create_directory(fs::path(path), error) || !error || error == std::errc::file_exists)
 		{
 			return;
 		}
-#else
-		if (CreateDirectory(path.c_str(), NULL) || GetLastError() == ERROR_ALREADY_EXISTS)
-		{
-			return;
-		}
-#endif
 
 		throw_colour_management_error("Unable to create generated asset directory");
 	}
@@ -350,7 +355,7 @@ namespace
 		return data;
 	}
 
-#ifndef __MACH__
+	#ifdef _WIN32
 	std::vector<unsigned char> read_binary_file(const char *path)
 	{
 		FILE *file = NULL;

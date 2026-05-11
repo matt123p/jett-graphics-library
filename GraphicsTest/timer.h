@@ -8,9 +8,11 @@
 #ifndef GenericOrdering_timer_h
 #define GenericOrdering_timer_h
 
-#ifdef __MACH__
+#if defined(__APPLE__)
 #include <mach/clock.h>
 #include <mach/mach.h>
+#elif !defined(_WIN32)
+#include <time.h>
 #endif
 
 
@@ -18,12 +20,14 @@ class CTimer
 {
 private:
 
-#ifdef __MACH__
+#if defined(__APPLE__)
     uint64_t        m_start;
     clock_serv_t    m_cclock;
     mach_timespec_t m_mts_start;
+#elif defined(_WIN32)
+    LARGE_INTEGER   m_start;
 #else
-	LARGE_INTEGER	m_start;
+    timespec        m_start;
 #endif
 
 public:

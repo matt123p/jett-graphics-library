@@ -2,6 +2,8 @@ cmake_minimum_required(VERSION 3.20)
 
 project(JettGraphicsLibrary VERSION 1.0.0 LANGUAGES CXX)
 
+include(CTest)
+
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
@@ -101,4 +103,6 @@ if(JETT_BUILD_TESTS)
     )
     target_include_directories(GraphicsTest PRIVATE GraphicsLibrary GraphicsTest)
     target_link_libraries(GraphicsTest PRIVATE jett)
+    add_test(NAME GraphicsTest COMMAND GraphicsTest)
+    set_tests_properties(GraphicsTest PROPERTIES WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
 endif()
