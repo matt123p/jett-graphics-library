@@ -4,9 +4,9 @@ Jett Graphics Library is a high-speed 2D drawing library aimed at print-oriented
 
 Documentation is published at [matt123p.github.io/jett-graphics-library](https://matt123p.github.io/jett-graphics-library/).
 
-## Build requirements
+## How to Build
 
-### Windows
+### Windows build requirements
 
 - Visual Studio 2022 with Desktop development with C++
 - MSVC v143 and a recent Windows SDK
@@ -14,7 +14,19 @@ Documentation is published at [matt123p.github.io/jett-graphics-library](https:/
 - Ruby and Bundler if you want to build the Jekyll documentation locally
 - an OpenCL runtime if you want to exercise the GPU backend
 
-### Linux
+### Build on Windows
+
+Bootstrap `vcpkg`, then build the Win32 solution:
+
+```powershell
+.\vcpkg\bootstrap-vcpkg.bat
+msbuild .\GraphicsLibrary.sln /p:Configuration=Release /p:Platform=Win32
+```
+
+The solution uses `vcpkg` manifest mode, so the declared packages are restored automatically during the build. Open `GraphicsLibrary.sln` in Visual Studio if you prefer building from the IDE.
+
+
+### Linux build requirements
 
 - CMake 3.20+
 - a C++17 compiler such as GCC 13 or Clang 16+
@@ -30,18 +42,7 @@ sudo apt-get install -y build-essential cmake pkg-config \
 	ocl-icd-opencl-dev
 ```
 
-## Build the native solution
-
-Bootstrap `vcpkg`, then build the Win32 solution:
-
-```powershell
-.\vcpkg\bootstrap-vcpkg.bat
-msbuild .\GraphicsLibrary.sln /p:Configuration=Release /p:Platform=Win32
-```
-
-The solution uses `vcpkg` manifest mode, so the declared packages are restored automatically during the build. Open `GraphicsLibrary.sln` in Visual Studio if you prefer building from the IDE.
-
-## Build on Linux
+### Build on Linux
 
 Configure and build the shared library with CMake:
 
@@ -56,7 +57,6 @@ Notes:
 
 - The Linux build keeps the public FreeType-based font-loading API and the OpenCL backend.
 - Windows-only GDI bitmap and HFONT entry points remain available only when building on Windows.
-- `GraphicsTest` is disabled by default on Linux because the legacy test harness still assumes Windows-style assets and filesystem behavior.
 
 ## Build the documentation site
 
